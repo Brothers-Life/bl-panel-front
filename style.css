@@ -405,6 +405,7 @@ kbd {
 .t td.msg { color: var(--ink); min-width: 280px; overflow-wrap: anywhere; }
 .t.clickable tbody tr[data-href] { cursor: pointer; }
 .t.mono td { font-family: var(--mono); font-size: 12px; padding-top: 7px; padding-bottom: 7px; }
+.t td.reason { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; }
 .t td.empty { text-align: center; padding: 40px 14px; color: var(--ink-3); }
 .empty-ic { display: grid; place-items: center; width: 40px; height: 40px; margin: 0 auto 10px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
 

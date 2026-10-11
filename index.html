@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=1.0.1">
 <script>
   /* Thème appliqué avant le rendu pour éviter le flash. */
   try { const t = localStorage.getItem('bl-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
@@ -386,7 +386,7 @@
         <div class="grid2">
           <article class="card">
             <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-login"/></svg>Dernières connexions</div></header>
-            <div class="table-wrap"><table class="t" id="tConn"><thead><tr><th>Début</th><th>Joueur</th><th>Fin</th></tr></thead><tbody></tbody></table></div>
+            <div class="table-wrap"><table class="t" id="tConn"><thead><tr><th>Début</th><th>Joueur</th><th>Fin</th><th>Raison</th></tr></thead><tbody></tbody></table></div>
           </article>
           <article class="card">
             <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-flame"/></svg>Explosions</div></header>
@@ -425,6 +425,6 @@
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=1.0.1"></script>
 </body>
 </html>
