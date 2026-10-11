@@ -15,6 +15,7 @@ const money = (v) => (v == null ? '–' : fmt.format(Math.round(v)) + ' $');
 const moneyCompact = (v) => (v == null ? '–' : fmtCompact.format(v) + ' $');
 const dt = (v) => (v ? new Date(v).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '–');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const clean = (s) => String(s ?? '').replace(/\^\d/g, '');
 const icon = (name, cls = '') => `<svg class="ic ${cls}"><use href="#i-${name}"/></svg>`;
 
 function rel(v) {
@@ -144,10 +145,11 @@ function timeLabel(v, span) {
 
 function timeChart(id, datasets, opts = {}) {
   if (charts[id]) charts[id].destroy();
-  const xs = datasets.flatMap((d) => d.data.map((p) => p.x)).filter(Number.isFinite);
-  const xMin = xs.length ? Math.min(...xs) : undefined;
-  const xMax = xs.length ? Math.max(...xs) : undefined;
-  const span = xs.length ? xMax - xMin : 0;
+  for (const d of datasets) if (!opts.bar) d.data = downsample(d.data);
+  let xMin = Infinity, xMax = -Infinity;
+  for (const d of datasets) for (const p of d.data) if (Number.isFinite(p.x)) { if (p.x < xMin) xMin = p.x; if (p.x > xMax) xMax = p.x; }
+  if (xMin === Infinity) xMin = xMax = undefined;
+  const span = xMin === undefined ? 0 : xMax - xMin;
   const fmtY = opts.money ? (v) => moneyCompact(v) : (v) => fmtCompact.format(v);
   charts[id] = new Chart($('#' + id), {
     type: opts.bar ? 'bar' : 'line',
@@ -179,6 +181,24 @@ function timeChart(id, datasets, opts = {}) {
       },
     },
   });
+}
+
+/* Garde au plus ~max points (min et max de chaque tranche) pour ne pas noyer Chart.js. */
+function downsample(pts, max = 600) {
+  if (pts.length <= max) return pts;
+  const size = Math.ceil(pts.length / (max / 2));
+  const out = [];
+  for (let i = 0; i < pts.length; i += size) {
+    let lo = null, hi = null;
+    for (let j = i; j < Math.min(i + size, pts.length); j++) {
+      const p = pts[j];
+      if (p.y == null) continue;
+      if (!lo || p.y < lo.y) lo = p;
+      if (!hi || p.y > hi.y) hi = p;
+    }
+    if (lo && hi) out.push(...(lo === hi ? [lo] : lo.x < hi.x ? [lo, hi] : [hi, lo]));
+  }
+  return out;
 }
 
 const tsSeries = (list, key) => (list || []).map((r) => ({ x: new Date(isNaN(r.t) ? r.t : Number(r.t)).getTime(), y: r[key] == null ? null : Number(r[key]) }));
@@ -261,6 +281,7 @@ async function loadOverview() {
   $('#hudCapacity').textContent = k.max ? `${k.max} places` : 'capacité –';
   const pct = k.max ? Math.min(100, Math.round((Number(k.online) || 0) / Number(k.max) * 100)) : 0;
   $('#hudRing').style.setProperty('--p', pct);
+  $('#hudRing .ring-fill').style.opacity = pct > 0 ? 1 : 0;
   animateNumber($('#hudPct'), pct);
 
   animateNumber($('#kChars'), k.chars ?? 0);
@@ -273,7 +294,7 @@ async function loadOverview() {
   const barsEl = $('#hudBars');
   const seg = 48;
   if (barsEl.children.length !== seg) barsEl.innerHTML = '<i></i>'.repeat(seg);
-  const maxV = Math.max(Number(k.max) || 0, ...online.map((p) => Number(p.value) || 0), 1);
+  const maxV = online.reduce((m, p) => Math.max(m, Number(p.value) || 0), Math.max(Number(k.max) || 0, 1));
   [...barsEl.children].forEach((el, i) => {
     const p = online[Math.floor(i * online.length / seg)];
     const v = p ? Number(p.value) : 0;
@@ -290,7 +311,7 @@ async function loadOverview() {
 
   const errors = d.errors || [];
   $('#errCount').textContent = errors.length ? `${errors.length} récentes` : 'aucune';
-  rows('#tErrors', errors, (e) => `<tr class="lvl-row-error"><td class="time">${dt(e.ts)}</td><td><span class="code">${esc(e.channel)}</span></td><td class="msg">${esc(e.line)}</td></tr>`, 'Aucune erreur récente. Tout roule.');
+  rows('#tErrors', errors, (e) => `<tr class="lvl-row-error"><td class="time">${dt(e.ts)}</td><td><span class="code">${esc(e.channel)}</span></td><td class="msg">${esc(clean(e.line))}</td></tr>`, 'Aucune erreur récente. Tout roule.');
 }
 
 async function loadEconomy() {
@@ -441,17 +462,23 @@ async function loadLogs() {
     .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
     .map(([lvl, data]) => bars(lvl, data, colors[lvl] || T.ink3)), { bar: true, stacked: true });
 
-  rows('#tLogs', d.logs, (l) => `<tr class="lvl-row-${esc(l.level)}"><td class="time">${dt(l.ts)}</td><td>${esc(l.channel)}</td><td>${levelBadge(l.level)}</td><td class="msg">${esc(l.line)}</td></tr>`, 'Aucune ligne ne correspond.');
-  rows('#tChat', d.chat, (c) => `<tr><td class="time">${dt(c.ts)}</td><td>${playerLink(c.citizenid, c.player_name)}</td><td><span class="badge ${c.subtype === 'command' ? 'brand' : 'plain'}">${esc(c.subtype)}</span></td><td class="msg">${esc(c.message)}</td></tr>`);
+  rows('#tLogs', d.logs, (l) => `<tr class="lvl-row-${esc(l.level)}"><td class="time">${dt(l.ts)}</td><td>${esc(l.channel)}</td><td>${levelBadge(l.level)}</td><td class="msg">${esc(clean(l.line))}</td></tr>`, 'Aucune ligne ne correspond.');
+  rows('#tChat', d.chat, (c) => `<tr><td class="time">${dt(c.ts)}</td><td>${playerLink(c.citizenid, c.player_name)}</td><td><span class="badge ${c.subtype === 'command' ? 'brand' : 'plain'}">${esc(c.subtype)}</span></td><td class="msg">${esc(clean(c.message))}</td></tr>`);
 }
+
+const EXPLOSIONS = ['grenade', 'lance-grenades', 'bombe collante', 'molotov', 'roquette', 'obus de tank', 'hi-octane', 'voiture', 'avion',
+  'pompe à essence', 'moto', 'vapeur', 'flamme', 'bouche incendie', 'bonbonne de gaz', 'bateau', 'navire', 'camion', 'balle explosive',
+  'lance-fumigènes', 'fumigène', 'gaz BZ', 'fusée éclairante', 'bidon d’essence', 'extincteur', 'charge programmable', 'train', 'baril',
+  'propane', 'dirigeable', 'flamme explosive', 'citerne', 'roquette d’avion', 'balle de véhicule', 'réservoir', 'fiente d’oiseau'];
+const explosionLabel = (t) => { const n = Number(t); return Number.isInteger(n) && EXPLOSIONS[n] ? `${EXPLOSIONS[n]} (${n})` : String(t ?? '?'); };
 
 const ACTION_BADGE = { ban: 'danger', kick: 'warn', warn: 'warn', unban: 'ok', jail: 'info' };
 async function loadAdmin() {
   const d = await api('admin');
   timeChart('chDeaths', [bars('morts', (d.deathsByHour || []).map((r) => ({ x: new Date(r.t).getTime(), y: Number(r.n) })), T.c3, { maxBarThickness: 8 })], { bar: true });
-  rows('#tActions', d.actions, (a) => `<tr><td class="time">${dt(a.ts)}</td><td><span class="badge ${ACTION_BADGE[String(a.action).toLowerCase()] || 'plain'}">${esc(a.action)}</span></td><td><b>${esc(a.staff || '–')}</b></td><td>${esc(a.target || '–')}</td><td class="msg">${esc(a.reason || '–')}</td><td class="nowrap">${esc(a.duration || '–')}</td></tr>`);
-  rows('#tConn', d.connections, (c) => `<tr><td class="time">${dt(c.start_ts)}</td><td>${playerLink(c.citizenid, c.player_name)}</td><td class="time">${c.end_ts ? dt(c.end_ts) : '<span class="badge ok">en ligne</span>'}</td></tr>`);
-  rows('#tExpl', d.explosions, (e) => `<tr><td class="time">${dt(e.ts)}</td><td>${playerLink(e.citizenid, e.player_name)}</td><td><span class="badge danger">${esc(e.type || '?')}</span></td></tr>`);
+  rows('#tActions', d.actions, (a) => `<tr><td class="time">${dt(a.ts)}</td><td><span class="badge ${ACTION_BADGE[String(a.action).toLowerCase()] || 'plain'}">${esc(a.action)}</span></td><td><b>${esc(a.staff || '–')}</b></td><td>${esc(a.target || '–')}</td><td class="msg">${esc(clean(a.reason) || '–')}</td><td class="nowrap">${esc(a.duration || '–')}</td></tr>`);
+  rows('#tConn', d.connections, (c) => `<tr><td class="time">${dt(c.start_ts)}</td><td>${playerLink(c.citizenid, c.player_name)}</td><td class="time">${c.end_ts ? dt(c.end_ts) : '<span class="badge ok">en ligne</span>'}</td><td class="reason" title="${esc(c.drop_reason || '')}">${esc(c.drop_reason || '–')}</td></tr>`);
+  rows('#tExpl', d.explosions, (e) => `<tr><td class="time">${dt(e.ts)}</td><td>${playerLink(e.citizenid, e.player_name)}</td><td><span class="badge danger">${esc(explosionLabel(e.type))}</span></td></tr>`);
 }
 
 /* ------------------------------- navigation ------------------------------ */
