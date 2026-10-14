@@ -368,6 +368,7 @@ async function loadEconomy() {
   const shops = d.shops || [];
   const ca = shops.reduce((s, x) => s + (Number(x.ca) || 0), 0);
   animateNumber($('#eShops'), ca, moneyCompact);
+  loadInflation().catch(() => { /* API pas à jour */ });
   const latest = d.latest || {};
   const extra = d.extra || [];
   const firstX = extra.find((r) => r.crypto != null) || {}, lastX = [...extra].reverse().find((r) => r.crypto != null) || {};
@@ -459,6 +460,8 @@ async function loadPlayer(cid) {
   $('#pPurchases').textContent = fmt.format(stats.purchases ?? 0);
   $('#pMoney').textContent = money((Number(id.cash) || 0) + (Number(id.bank) || 0));
 
+  loadLinked(cid);
+  if (!$('[data-panel="journal"]').classList.contains('hidden')) loadJournal(cid).catch(console.error);
   timeChart('chPlayerMoney', [
     series('cash', tsSeries(d.money, 'cash'), T.c1),
     series('banque', tsSeries(d.money, 'bank'), T.c2),
@@ -673,7 +676,8 @@ async function loadAlerts() {
     <td class="r"><b class="money pos">+${money(p.jump)}</b></td>
     <td class="time" title="${esc(dt(p.ts))}">${esc(rel(p.ts))}</td>
     <td class="r money">${moneyCompact(Number(p.prev))} → ${moneyCompact(Number(p.total))}</td>
-    <td class="r money ${Number(p.net) >= 0 ? 'pos' : 'neg'}">${Number(p.net) >= 0 ? '+' : '−'}${moneyCompact(Math.abs(Number(p.net)))}</td></tr>`,
+    <td class="r money ${Number(p.net) >= 0 ? 'pos' : 'neg'}">${Number(p.net) >= 0 ? '+' : '−'}${moneyCompact(Math.abs(Number(p.net)))}</td>
+    <td class="r"><button type="button" class="btn sm" data-trace="${esc(p.citizenid)}" data-ts="${esc(p.ts)}" data-name="${esc(p.name || '')}">${icon('search', 'sm')}Origine</button></td></tr>`,
   'Aucun saut au-dessus du seuil sur la période.');
 }
 
@@ -927,6 +931,257 @@ async function loadDb() {
   addExportButtons();
 }
 
+/* ----------------------------- journaux du jeu ------------------------------ */
+
+const GAME_LABELS = {
+  bl_ac_detections: 'Anticheat', xt_prison: 'Prison', admindash_sanctions: 'Sanction staff', admindash_audit_log: 'Journal staff',
+  admindash_reports: 'Signalement', admindash_staff_sessions: 'Service staff', mdt_audit: 'MDT police', mdt_plate_scans: 'Plaque scannée',
+  premium_purchases: 'Achat premium', premium_shop_item_purchases: 'Boutique premium', premium_crate_openings: 'Caisse premium',
+  garage_admin_logs: 'Garage (staff)', shop_admin_logs: 'Boutique (staff)', job_admin_logs: 'Métier (staff)', job_safe_log: 'Coffre métier',
+  gang_safe_log: 'Coffre gang', player_transactions: 'Transaction', sky_phone_bank_transactions: 'Banque (téléphone)',
+  sky_phone_billing_invoices: 'Facture', bl_safezones_audit: 'Zone safe', teleport_admin_logs: 'Téléportation (staff)',
+  harvest_zone_logs: 'Récolte', door_logs: 'Porte', bl_weapon_skin_log: 'Skin d’arme', shop_admin: 'Boutique (staff)',
+  bank_flow: 'Flux bancaire', chat: 'Chat', command: 'Commande', explosion: 'Explosion', character_loaded: 'Personnage chargé',
+  server_start: 'Démarrage serveur', anticheat: 'Anticheat', admin_action: 'Action staff',
+};
+const sourceLabel = (type, subtype) => GAME_LABELS[subtype] || GAME_LABELS[type] || String(subtype || type || '?').replace(/_/g, ' ');
+const SKIP_KEYS = new Set(['id', 'citizenid', 'created_at', 'updated_at', 'createdAt', 'backfill', 'extra']);
+function summarize(data, max = 5) {
+  if (!data || typeof data !== 'object') return '';
+  return Object.entries(data).filter(([k, v]) => !SKIP_KEYS.has(k) && v !== null && v !== '' && typeof v !== 'object')
+    .slice(0, max).map(([k, v]) => `${k.replace(/_/g, ' ')} : ${String(v).slice(0, 120)}`).join(' · ');
+}
+function highlight(text, term) {
+  const t = esc(text);
+  if (!term) return t;
+  const re = new RegExp(esc(term).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+  return t.replace(re, (m) => `<mark>${m}</mark>`);
+}
+
+/* ------------------------------ journal du joueur ----------------------------- */
+
+let jCid = null, jBefore = null;
+const dayLabel = (d) => new Date(d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+function journalItem(it, cid) {
+  const d = it.data || {};
+  const time = new Date(it.ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const row = (ic, accent, main, sub = '') => `<li><span class="feed-ic" style="--accent:${accent}">${icon(ic)}</span><div class="j-main">${main}${sub ? `<span class="j-sub">${sub}</span>` : ''}</div><span class="feed-time">${time}</span></li>`;
+  switch (it.kind) {
+    case 'session_start': return row('login', 'var(--ok)', '<b>Connexion</b>');
+    case 'session_end': return row('logout', 'var(--ink-3)', `<b>Déconnexion</b>${d.minutes != null ? ` après ${fmt.format(d.minutes)} min` : ''}`, esc(d.reason || ''));
+    case 'death': return row('skull', 'var(--c3)', `<b>Mort</b> · ${esc(d.cause || '?')}${d.killer ? ' par ' + playerLink(d.killer_cid, d.killer) : ''}`,
+      [d.weapon ? `<span class="code">${esc(d.weapon)}</span>` : '', d.x != null ? `<a href="#map=${Math.round(d.x)},${Math.round(d.y)}">voir sur la carte</a>` : '',
+        d.screenshot_url ? `<a href="#" data-shot="${esc(d.screenshot_url)}">capture</a>` : ''].filter(Boolean).join(' · '));
+    case 'kill': return row('target', 'var(--danger)', `<b>A tué</b> ${playerLink(d.victim_cid, d.victim)}`, d.weapon ? `<span class="code">${esc(d.weapon)}</span>` : '');
+    case 'purchase': return row('cart', 'var(--c1)', `<b>Achat</b> · ${esc(d.article || '?')} ×${d.qty ?? 1}`, `${esc(d.shop || '')} · ${money(d.total)}`);
+    case 'bank_flow': {
+      const out = d.from_cid === cid;
+      return row('swap', out ? 'var(--danger)' : 'var(--ok)', `<b class="${out ? 'neg' : 'pos'}">${out ? '−' : '+'}${money(d.amount)}</b> · ${esc(d.kind || 'flux')}`,
+        `${out ? 'vers ' + playerLink(d.to_cid) : 'de ' + playerLink(d.from_cid)}${d.note ? ' · ' + esc(d.note) : ''}`);
+    }
+    case 'chat': case 'command': return row('message', 'var(--c4)', `<b>${it.kind === 'command' ? 'Commande' : 'Chat'}</b> · ${esc(clean(d.message || ''))}`);
+    case 'alert': return row('bell', 'var(--brand-1)', `<b>Alerte</b> · ${esc(d.title || '')}`);
+    case 'anticheat': return row('shield', 'var(--danger)', `<b>Anticheat</b> · ${esc(d.reason || '')}`, esc(summarize(d.details)));
+    case 'explosion': return row('flame', 'var(--c3)', `<b>Explosion</b> · ${esc(explosionLabel(d.explosion_type))}`);
+    default: return row('database', 'var(--c2)', `<b>${esc(sourceLabel(null, it.kind))}</b>`, esc(summarize(d)));
+  }
+}
+
+async function loadJournal(cid, more = false) {
+  if (!more) { jCid = cid; jBefore = null; $('#journal').innerHTML = '<li class="feed-empty" style="display:block">Chargement…</li>'; }
+  const d = await api('timeline', `?cid=${encodeURIComponent(cid)}&limit=150${jBefore ? '&before=' + encodeURIComponent(jBefore) : ''}`);
+  if (cid !== jCid) return;
+  const items = d.items || [];
+  let html = '', lastDay = more ? $('#journal').dataset.lastDay : '';
+  for (const it of items) {
+    const day = new Date(it.ts).toDateString();
+    if (day !== lastDay) { html += `<li class="j-day">${esc(dayLabel(it.ts))}</li>`; lastDay = day; }
+    html += journalItem(it, cid);
+  }
+  $('#journal').dataset.lastDay = lastDay;
+  if (more) $('#journal').insertAdjacentHTML('beforeend', html);
+  else $('#journal').innerHTML = html || '<li class="feed-empty" style="display:block">Rien d’enregistré pour ce joueur.</li>';
+  if (items.length) jBefore = items[items.length - 1].ts;
+  $('#jMore').classList.toggle('hidden', items.length < 150);
+  $('#jCount').textContent = $$('#journal li:not(.j-day):not(.feed-empty)').length + ' éléments';
+}
+$('#jMore').addEventListener('click', () => jCid && loadJournal(jCid, true).catch(console.error));
+
+async function loadLinked(cid) {
+  const box = $('#pLinked');
+  box.classList.add('hidden');
+  try {
+    const d = await api('linked', '?cid=' + encodeURIComponent(cid));
+    const list = d.players || [];
+    if (!list.length) return;
+    box.innerHTML = `<span class="badge warn">${icon('link', 'sm')} ${list.length} compte${list.length > 1 ? 's' : ''} lié${list.length > 1 ? 's' : ''}</span>`
+      + list.map((p) => `<a class="badge plain" href="#player=${encodeURIComponent(p.citizenid)}" title="${esc(p.via)}">${esc(p.name || p.citizenid)}</a>`).join('');
+    box.classList.remove('hidden');
+  } catch { /* API pas à jour */ }
+}
+
+/* -------------------------------- inflation -------------------------------- */
+
+let infDays = 30;
+async function loadInflation() {
+  const d = await api('inflation', '?d=' + infDays);
+  const days = (d.daily || []).map((r) => ({ t: new Date(r.day).getTime(), total: (Number(r.cash) || 0) + (Number(r.bank) || 0), chars: Number(r.chars) || 0 }));
+  const w = d.wealth || {};
+  $('#infMedian').textContent = w.median != null ? moneyCompact(Number(w.median)) : '–';
+  $('#infMean').textContent = w.mean != null ? moneyCompact(Number(w.mean)) : '–';
+  $('#infMeanFoot').textContent = w.n ? `sur ${fmt.format(w.n)} personnages` : '–';
+  const net = days.length > 1 ? days[days.length - 1].total - days[0].total : null;
+  $('#infNet').innerHTML = net == null ? '–' : `<span class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : '−'}${moneyCompact(Math.abs(net))}</span>`;
+  $('#infNetFoot').textContent = days.length > 1 ? `en ${days.length - 1} jours · ${moneyCompact(Math.abs(net) / (days.length - 1))}/jour` : 'pas encore assez de jours';
+  const last = days[days.length - 1];
+  $('#infPer').textContent = last && last.chars ? moneyCompact(last.total / last.chars) : '–';
+  const deltas = days.slice(1).map((x, i) => ({ x: x.t, y: x.total - days[i].total }));
+  timeChart('chInflation', [bars('création nette / jour', deltas, T.c1, {
+    backgroundColor: deltas.map((p) => (p.y >= 0 ? alpha(T.c2, .8) : alpha(T.c3, .8))), maxBarThickness: 22,
+  })], { bar: true, money: true });
+  const kinds = {};
+  for (const f of d.flows || []) { const k = (kinds[f.kind] = kinds[f.kind] || { n: 0, total: 0 }); k.n += f.n; k.total += Number(f.total) || 0; }
+  rows('#tInfFlows', Object.entries(kinds).sort((a, b) => b[1].total - a[1].total),
+    ([k, v]) => `<tr><td><span class="badge plain">${esc(k)}</span></td><td class="r money">${fmt.format(v.n)}</td><td class="r money">${money(v.total)}</td></tr>`,
+    'Aucun flux bancaire sur la période.');
+}
+
+/* --------------------------- origine d'un saut d'argent --------------------------- */
+
+async function openTrace(cid, ts, name) {
+  $('#traceModal').classList.remove('hidden');
+  $('#trTitle').textContent = `Origine du saut d’argent · ${name || cid}`;
+  $('#trBody').innerHTML = '<div class="empty-block">Analyse…</div>';
+  try {
+    const d = await api('trace', `?cid=${encodeURIComponent(cid)}&ts=${encodeURIComponent(ts)}&min=60`);
+    const bal = (s) => (s ? (Number(s.cash) || 0) + (Number(s.bank) || 0) : null);
+    const b = bal(d.before), a = bal(d.after);
+    const list = (title, items, render, empty) => `<div class="tr-sec">${title}</div>` + (items.length ? `<ul class="journal">${items.map(render).join('')}</ul>` : `<div class="time">${empty}</div>`);
+    const flows = (d.flows || []).map((f) => ({ ts: f.ts, kind: 'bank_flow', data: f.data }));
+    const ev = (d.events || []).map((e) => ({ ts: e.ts, kind: e.subtype || e.type, data: e.data }));
+    $('#trBody').innerHTML = `
+      <div class="tr-bal"><div><span>Avant (${d.before ? esc(dt(d.before.ts)) : '–'})</span><b>${b == null ? '–' : money(b)}</b></div>
+        ${icon('chevron')}<div><span>Après (${d.after ? esc(dt(d.after.ts)) : 'pas encore de relevé'})</span><b>${a == null ? '–' : money(a)}</b></div></div>
+      <p class="time">Tout ce qui concerne ce joueur dans l’heure qui précède le saut (et 5 min après).</p>
+      ${list('Flux bancaires', flows, (x) => journalItem(x, cid), 'Aucun virement ni dépôt enregistré : l’argent ne vient pas de la banque.')}
+      ${list('Achats', d.purchases || [], (p) => journalItem({ ts: p.ts, kind: 'purchase', data: { shop: p.shop, article: p.article, qty: p.qty, total: p.total } }, cid), 'Aucun achat.')}
+      ${list('Autres événements', ev, (x) => journalItem(x, cid), 'Rien d’autre.')}
+      ${list('Actions staff mentionnant ce joueur', (d.staff || []).map((s2) => ({ ts: s2.ts, kind: 'admin_action', data: s2.data })), (x) => journalItem(x, cid), 'Aucune.')}
+      <div class="tr-sec">Conclusion</div><p class="time">${!flows.length && !(d.staff || []).length
+        ? '⚠️ Aucun virement ni action staff n’explique ce montant : à vérifier (script, exploit, give manuel non tracé).'
+        : 'Les mouvements ci-dessus expliquent au moins en partie ce montant.'}</p>
+      <p><a class="btn sm" href="#player=${encodeURIComponent(cid)}">Ouvrir la fiche du joueur</a></p>`;
+  } catch (e) { $('#trBody').innerHTML = `<div class="empty-block">${esc(e.message)}</div>`; }
+}
+$('#traceModal').addEventListener('click', (e) => { if (e.target.closest('[data-close-modal]') || e.target.closest('a[href^="#player"]')) $('#traceModal').classList.add('hidden'); });
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-trace]');
+  if (b) openTrace(b.dataset.trace, b.dataset.ts, b.dataset.name);
+});
+
+/* ------------------------------ recherche globale ------------------------------ */
+
+let gDays = 7, gTimer;
+async function loadSearch() {
+  const term = $('#gSearch').value.trim();
+  $('#gEmpty').classList.toggle('hidden', term.length >= 2);
+  $('#gResults').classList.toggle('hidden', term.length < 2);
+  if (term.length < 2) return;
+  const d = await api('search', `?q=${encodeURIComponent(term)}&days=${gDays}`);
+  if ($('#gSearch').value.trim() !== term) return;
+  const players = d.players || [];
+  $('#gnPlayers').textContent = players.length;
+  $('#gPlayers').innerHTML = players.length ? players.map((p) => `<a class="g-player" href="#player=${encodeURIComponent(p.citizenid)}">${avatar(p.citizenid, p.name)}<div><b>${highlight(p.name || p.citizenid, term)}</b><span>${highlight(p.citizenid, term)} · ${esc(p.job || 'sans métier')}${p.online ? ' · en ligne' : ''}</span></div></a>`).join('')
+    : '<div class="empty-block">Aucun joueur.</div>';
+  $('#gnEvents').textContent = (d.events || []).length;
+  rows('#tgEvents', d.events, (e) => `<tr><td class="time">${dt(e.ts)}</td><td><span class="badge plain">${esc(sourceLabel(e.type, e.subtype))}</span></td><td>${e.citizenid || e.player_name ? playerLink(e.citizenid, e.player_name) : '–'}</td><td class="msg">${highlight(summarize(e.data, 6), term)}</td></tr>`, 'Rien dans les journaux.');
+  $('#gnChat').textContent = (d.chat || []).length;
+  rows('#tgChat', d.chat, (c) => `<tr><td class="time">${dt(c.ts)}</td><td>${playerLink(c.citizenid, c.player_name)}</td><td><span class="badge ${c.subtype === 'command' ? 'brand' : 'plain'}">${esc(c.subtype)}</span></td><td class="msg">${highlight(clean(c.message), term)}</td></tr>`, 'Rien dans le chat.');
+  $('#gnLogs').textContent = (d.logs || []).length;
+  rows('#tgLogs', d.logs, (l) => `<tr class="lvl-row-${esc(l.level)}"><td class="time">${dt(l.ts)}</td><td>${esc(l.channel)}</td><td>${levelBadge(l.level)}</td><td class="msg">${highlight(clean(l.line), term)}</td></tr>`, 'Rien dans les logs.');
+}
+$('#gSearch').addEventListener('input', () => { clearTimeout(gTimer); gTimer = setTimeout(() => run(false), 350); });
+
+/* --------------------------------- scripts --------------------------------- */
+
+let resFilter = '', resRows = [];
+function renderResources() {
+  rows('#tResources', resRows.filter((r) => !resFilter || (resFilter === 'started' ? r[1] === 'started' : r[1] !== 'started')).sort((a, b) => String(a[0]).localeCompare(b[0])),
+    (r) => `<tr><td><span class="code">${esc(r[0])}</span></td><td><span class="badge ${r[1] === 'started' ? 'ok' : r[1] === 'stopped' ? 'danger' : 'warn'}">${esc(r[1])}</span></td><td>${esc(r[2] || '–')}</td><td class="time">${esc(r[3] || '–')}</td></tr>`,
+    'Liste pas encore reçue (bl_telemetry 1.2).');
+}
+async function loadScripts() {
+  const d = await api('scripts');
+  resRows = d.list?.rows || [];
+  const started = resRows.filter((r) => r[1] === 'started').length;
+  $('#scStarted').textContent = resRows.length ? fmt.format(started) : '–';
+  $('#scStartedFoot').textContent = resRows.length ? `sur ${resRows.length} · ${resRows.length - started} arrêtée(s)` : 'en attente de bl_telemetry';
+  const res = d.resources || [];
+  const errs = res.reduce((s2, r) => s2 + r.errors, 0);
+  $('#scErrors').textContent = fmt.format(errs);
+  $('#scErrorsFoot').textContent = `sur 24 h · ${res.filter((r) => r.errors).length} ressource(s)`;
+  $('#scHitches').textContent = fmt.format(d.hitches?.count || 0);
+  $('#scHitchesFoot').textContent = d.hitches?.worst ? `sur 24 h · pire ${fmt.format(d.hitches.worst)} ms` : 'sur 24 h';
+  $('#scRestarts').textContent = fmt.format((d.restarts || []).length);
+  $('#scRestartsFoot').textContent = d.restarts?.length ? `dernier ${rel(d.restarts[0])}` : 'sur 30 jours';
+  const hours = d.hitches?.hours || [];
+  timeChart('chHitches', [
+    bars('ralentissements', hours.map((h) => ({ x: h.t, y: h.n })), T.c5, { maxBarThickness: 18 }),
+  ], { bar: true });
+  rows('#tScripts', res, (r) => `<tr><td><span class="code">${esc(r.channel)}</span></td><td class="r"><b class="${r.errors ? 'neg' : ''}">${fmt.format(r.errors)}</b></td><td class="r">${fmt.format(r.warns)}</td>
+    <td class="msg">${r.lastError ? `<span class="time">${esc(rel(r.lastError.ts))}</span> ${esc(clean(r.lastError.line))}` : '–'}</td></tr>`, 'Aucune erreur ni avertissement sur 24 h.');
+  renderResources();
+}
+
+/* --------------------------------- annonces --------------------------------- */
+
+let anMode = 'both', anType = 'inform';
+const AN_STATUS = { pending: ['warn', 'en attente'], sent: ['info', 'envoyée au serveur'], done: ['ok', 'affichée en jeu'], failed: ['danger', 'échec'], expired: ['danger', 'expirée (serveur hors ligne ?)'] };
+function renderAnPreview() {
+  const box = $('#anPreview');
+  box.className = 'an-preview ' + anType;
+  box.innerHTML = `<b>${esc($('#anTitle').value || 'Annonce')}</b><span>${esc($('#anMsg').value || 'Ton message apparaîtra ici.')}</span>`;
+  $('#anCount').textContent = `${$('#anMsg').value.length} / 500`;
+}
+async function loadAnnounce() {
+  $('#anWho').textContent = me ? (me.webmaster ? 'webmaster' : 'staff') : 'panel';
+  renderAnPreview();
+  const d = await api('commands');
+  const list = d.commands || [];
+  $('#anList').innerHTML = list.length ? list.map((c) => {
+    const [cls, label] = AN_STATUS[c.status] || ['plain', c.status];
+    return `<li class="sev-${cls === 'danger' ? 'critical' : cls === 'ok' ? 'ok' : 'info'}"><span class="feed-ic">${icon('megaphone')}</span><div>
+      <div class="tl-title">${esc(c.payload?.title || 'Annonce')}</div><div class="tl-detail">${esc(c.payload?.message || '')}</div>
+      <div class="tl-meta"><span title="${esc(dt(c.ts))}">${esc(rel(c.ts))}</span><span>par <b>${esc(c.author || '?')}</b></span><span class="badge ${cls}">${esc(label)}</span>${c.result ? `<span class="time">${esc(c.result)}</span>` : ''}</div></div></li>`;
+  }).join('') : '<li class="feed-empty" style="display:block">Aucune annonce pour le moment.</li>';
+}
+$('#anTitle').addEventListener('input', renderAnPreview);
+$('#anMsg').addEventListener('input', renderAnPreview);
+$('#anForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = $('#anMsg').value.trim();
+  if (!message) return;
+  const btn = $('#anForm button[type=submit]');
+  btn.disabled = true;
+  try {
+    const r = await fetch(API_BASE + '/api/commands', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'announce', payload: { title: $('#anTitle').value.trim() || 'Annonce', message, mode: anMode, type: anType } }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { toast('Annonce refusée', d.error || 'HTTP ' + r.status, 'warn'); return; }
+    toast('Annonce envoyée', 'Elle s’affichera en jeu d’ici quelques secondes.', 'ok', 'check');
+    $('#anMsg').value = ''; renderAnPreview(); run(false);
+  } finally { btn.disabled = false; }
+});
+
+segmented('infRange', 'd', (v) => { infDays = Number(v); loadInflation().catch(console.error); });
+segmented('gDays', 'd', (v) => { gDays = Number(v); run(false); });
+segmented('resFilter', 'f', (v) => { resFilter = v; renderResources(); });
+segmented('anMode', 'm', (v) => { anMode = v; });
+segmented('anType', 't', (v) => { anType = v; renderAnPreview(); });
+
 /* --------------------------------- connexion -------------------------------- */
 
 let me = null;
@@ -1047,9 +1302,9 @@ async function boot() {
 
 /* ------------------------------- navigation ------------------------------ */
 
-const loaders = { overview: loadOverview, economy: loadEconomy, players: loadPlayers, logs: loadLogs, admin: loadAdmin, stats: loadStats, alerts: loadAlerts, db: loadDb, access: loadAccess };
+const loaders = { overview: loadOverview, economy: loadEconomy, players: loadPlayers, logs: loadLogs, admin: loadAdmin, stats: loadStats, alerts: loadAlerts, db: loadDb, access: loadAccess, search: loadSearch, scripts: loadScripts, announce: loadAnnounce };
 /* Les logs arrivent en direct par le flux ; le rafraîchissement complet sert de filet de sécurité. */
-const AUTO_REFRESH = { overview: 30000, logs: 60000, alerts: 60000 };
+const AUTO_REFRESH = { overview: 30000, logs: 60000, alerts: 60000, scripts: 60000, announce: 5000 };
 let current = { page: null, arg: null };
 let refreshTimer;
 
@@ -1116,7 +1371,12 @@ function selectTab(name) {
   $$('#playerTabs .tab').forEach((t) => { const on = t.dataset.tab === name; t.classList.toggle('active', on); t.setAttribute('aria-selected', on); });
   $$('#page-player .tabpanel').forEach((p) => p.classList.toggle('hidden', p.dataset.panel !== name));
 }
-$('#playerTabs').addEventListener('click', (e) => { const t = e.target.closest('.tab'); if (t) selectTab(t.dataset.tab); });
+$('#playerTabs').addEventListener('click', (e) => {
+  const t = e.target.closest('.tab');
+  if (!t) return;
+  selectTab(t.dataset.tab);
+  if (t.dataset.tab === 'journal' && current.page === 'player' && current.arg !== jCid) loadJournal(current.arg).catch(console.error);
+});
 
 /* ------------------------------- interactions ----------------------------- */
 
@@ -1166,7 +1426,10 @@ const PAGES = [
   { title: 'Joueurs', sub: 'Liste et recherche', href: '#players', icon: 'users' },
   { title: 'Logs', sub: 'Console serveur, chat et commandes', href: '#logs', icon: 'terminal' },
   { title: 'Statistiques', sub: 'Affluence, métiers, gangs, tueurs, armes', href: '#stats', icon: 'chart' },
+  { title: 'Recherche globale', sub: 'Joueurs, logs, chat et journaux du jeu', href: '#search', icon: 'search' },
   { title: 'Base de données', sub: 'Tables, fortunes, objets, véhicules, bans', href: '#db', icon: 'database' },
+  { title: 'Scripts', sub: 'Erreurs par ressource, ralentissements, redémarrages', href: '#scripts', icon: 'cpu' },
+  { title: 'Annonces', sub: 'Envoyer un message à tous les joueurs en jeu', href: '#announce', icon: 'megaphone' },
   { title: 'Staff & sécurité', sub: 'Actions staff, connexions, explosions', href: '#admin', icon: 'shield' },
   { title: 'Alertes', sub: 'Historique, Discord, sauts d’argent suspects', href: '#alerts', icon: 'bell' },
   { title: 'Carte des morts', sub: 'Carte de chaleur, zones, captures', href: '#map', icon: 'map' },

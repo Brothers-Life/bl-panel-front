@@ -28,6 +28,8 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 const API_URL = (process.env.API_URL || '').replace(/\/$/, '');
 const PANEL_API_KEY = process.env.PANEL_API_KEY || '';
 const MAX_BODY = 64 * 1024;
+// Qui peut envoyer des annonces en jeu : 'webmaster' (défaut) ou 'staff' (toute personne connectée).
+const ANNOUNCE_ALLOWED = (process.env.ANNOUNCE_ALLOWED || 'webmaster').toLowerCase();
 
 if (!API_URL) { console.error('API_URL manquante (adresse de bl-panel-api) — refus de démarrer.'); process.exit(1); }
 if (!PANEL_API_KEY) console.warn('[panel] PANEL_API_KEY absente : l’API doit alors être publique pour que le panel fonctionne.');
@@ -128,6 +130,15 @@ http.createServer(async (req, res) => {
       if (url === '/api/panel-users' || url.startsWith('/api/panel-users/')) return json(res, 404, { error: 'inconnu' });
       const user = await auth.guard(req, res);
       if (!user) return;
+      // Annonce en jeu : droits vérifiés ici, auteur ajouté d'après la session (jamais d'après le navigateur).
+      if (url === '/api/commands' && req.method === 'POST') {
+        const who = user === true ? null : user;
+        if (who && !who.webmaster && ANNOUNCE_ALLOWED !== 'staff') return json(res, 403, { error: 'Annonces réservées aux webmasters' });
+        let b;
+        try { b = JSON.parse((await readBody(req)).toString('utf8') || '{}'); } catch { return json(res, 400, { error: 'JSON invalide' }); }
+        try { return json(res, 200, await apiCall('POST', '/api/commands', { ...b, author: who ? who.name : 'panel' })); }
+        catch (e) { return json(res, 502, { error: e.message }); }
+      }
       return proxy(req, res, user === true ? null : user);
     }
 
