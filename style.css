@@ -846,7 +846,15 @@ tr.row-new td { animation: flash 1.6s var(--ease); }
 
 .tabbar button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 0; border: 0; border-radius: 14px; background: none; font-size: 10.5px; font-weight: 500; color: var(--ink-3); }
 
+.db-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.db-cards .card.wide { grid-column: 1 / -1; }
+.db-cards .chart { height: 260px; }
+.size-bar { display: flex; align-items: center; gap: 10px; min-width: 160px; }
+.size-bar .rank-bar { flex: 1; margin: 0; }
+.size-bar span { font-family: var(--mono); font-size: 12px; color: var(--ink-2); white-space: nowrap; min-width: 64px; text-align: right; }
+
 @media (max-width: 1200px) {
+  .db-cards { grid-template-columns: minmax(0, 1fr); }
   .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .map-layout { grid-template-columns: minmax(0, 1fr); }
   .map-side { max-height: 420px; }

@@ -811,6 +811,8 @@ function exportTable(table, name) {
 
 function addExportButtons() {
   for (const table of $$('table.t')) {
+    if (table.dataset.export) continue;
+    table.dataset.export = '1';
     const card = table.closest('.card');
     const head = card && $('.card-head, .console-head', card);
     const name = (head?.innerText || table.id).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || table.id;
@@ -845,9 +847,87 @@ segmented('statsRange', 'd', (v) => { statsDays = Number(v); run(true); });
 segmented('anoMin', 'min', (v) => { anoMin = Number(v); run(false); });
 segmented('anoRange', 'h', (v) => { anoHours = Number(v); run(false); });
 
+/* ----------------------------- base de données ----------------------------- */
+
+const bytes = (b) => {
+  const u = ['o', 'Ko', 'Mo', 'Go', 'To'];
+  let i = 0; b = Number(b) || 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return (i ? b.toFixed(b < 10 ? 1 : 0).replace('.', ',') : b) + ' ' + u[i];
+};
+const growth = (now, before) => (before == null ? '<span class="time">–</span>'
+  : now - before === 0 ? '<span class="time">0</span>'
+  : `<span class="${now > before ? 'pos' : 'neg'}">${now > before ? '+' : '−'}${fmt.format(Math.abs(now - before))}</span>`);
+const colLabel = (c) => String(c).replace(/_/g, ' ').replace(/^./, (x) => x.toUpperCase());
+const cellLabel = (v) => String(v ?? '–').replace(/^\d+\.\s/, ''); // "1. < 10 k$" -> "< 10 k$" (préfixe de tri)
+const isNum = (v) => typeof v === 'number' || (typeof v === 'string' && v !== '' && !isNaN(v));
+
+function dbCard(s, i) {
+  const id = 'db-' + s.name;
+  const head = `<header class="card-head"><div class="card-title">${icon(s.kind === 'table' ? 'list' : 'chart')}${esc(s.label)}</div><span class="chip" title="${esc(dt(s.ts))}">${esc(rel(s.ts))}</span></header>`;
+  if ((s.kind === 'bar' || s.kind === 'donut') && s.rows.length) return `<article class="card chart-card">${head}<div class="chart"><canvas id="${id}"></canvas></div></article>`;
+  const cols = s.columns || [];
+  const numeric = cols.map((_, j) => s.rows.length && s.rows.every((r) => r[j] == null || isNum(r[j])));
+  const body = s.rows.length
+    ? s.rows.map((r) => `<tr>${cols.map((_, j) => numeric[j] ? `<td class="r money">${fmt.format(Number(r[j]) || 0)}</td>` : `<td>${esc(cellLabel(r[j]))}</td>`).join('')}</tr>`).join('')
+    : `<tr><td class="empty" colspan="${cols.length || 1}"><div class="empty-ic">${icon('list')}</div>Aucune ligne.</td></tr>`;
+  const wide = cols.length > 3 ? ' wide' : '';
+  return `<article class="card${wide}">${head}<div class="table-wrap"><table class="t" id="${id}"><thead><tr>${cols.map((c, j) => `<th class="${numeric[j] ? 'r' : ''}">${esc(colLabel(c))}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></article>`;
+}
+
+function dbChart(s) {
+  const id = 'db-' + s.name;
+  const el = document.getElementById(id);
+  if (!el || el.tagName !== 'CANVAS') return;
+  const labels = s.rows.map((r) => cellLabel(r[0]));
+  const values = s.rows.map((r) => Number(r[1]) || 0);
+  if (s.kind === 'donut') { doughnut(id, labels.map((name, i) => ({ name, n: values[i] }))); return; }
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(el, {
+    type: 'bar',
+    data: { labels, datasets: [bars(colLabel(s.columns?.[1] || 'valeur'), values, T.c1, { borderRadius: 6, maxBarThickness: 26 })] },
+    options: {
+      indexAxis: labels.length > 6 ? 'y' : 'x', animation: reduceMotion ? false : { duration: 600 }, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${fmt.format(c.parsed[labels.length > 6 ? 'x' : 'y'])} ${s.columns?.[1] || ''}` } } },
+      scales: {
+        x: { grid: { display: labels.length > 6, color: T.line, drawTicks: false }, border: { display: false }, ticks: { color: T.ink2 } },
+        y: { grid: { display: labels.length <= 6, color: T.line, drawTicks: false }, border: { display: false }, ticks: { color: T.ink2, precision: 0 } },
+      },
+    },
+  });
+}
+
+async function loadDb() {
+  const d = await api('db');
+  const tables = d.tables || [];
+  const totalRows = tables.reduce((s, t) => s + t.rows, 0);
+  animateNumber($('#dbTables'), tables.length || null);
+  animateNumber($('#dbRows'), tables.length ? totalRows : null, (n) => fmtCompact.format(n));
+  const before = tables.filter((t) => t.rows24h != null);
+  const grown = before.reduce((s, t) => s + (t.rows - t.rows24h), 0);
+  $('#dbRowsFoot').innerHTML = before.length ? `${growth(totalRows, totalRows - grown)} sur 24 h` : 'estimation MySQL';
+  $('#dbSize').textContent = tables.length ? bytes(tables.reduce((s, t) => s + t.bytes, 0)) : '–';
+  const top = before.map((t) => ({ ...t, g: t.rows - t.rows24h })).sort((a, b) => b.g - a.g)[0];
+  $('#dbGrowth').textContent = top && top.g > 0 ? '+' + fmtCompact.format(top.g) : '–';
+  $('#dbGrowthFoot').textContent = top && top.g > 0 ? `${top.name} · sur 24 h` : 'pas encore d’historique';
+  $('#dbTs').textContent = d.tablesTs ? 'lu ' + rel(d.tablesTs) : 'en attente de bl_telemetry';
+
+  const maxB = tables[0]?.bytes || 1;
+  rows('#tDbTables', tables, (t) => `<tr><td><span class="code">${esc(t.name)}</span></td><td class="r money">${fmt.format(t.rows)}</td>
+    <td class="r money">${growth(t.rows, t.rows24h)}</td><td class="r money">${growth(t.rows, t.rows7d)}</td>
+    <td><div class="size-bar"><div class="rank-bar"><i style="width:${Math.max(2, Math.round(t.bytes / maxB * 100))}%"></i></div><span>${bytes(t.bytes)}</span></div></td></tr>`,
+  'Aucune donnée : installe bl_telemetry 1.1 (module dbsync) sur le serveur.');
+
+  const snaps = d.snapshots || [];
+  $('#dbCards').innerHTML = snaps.length ? snaps.map(dbCard).join('')
+    : '<article class="card wide"><div class="empty-block">Les lectures de la base apparaîtront ici après la mise à jour de <span class="code">bl_telemetry</span> sur le serveur.</div></article>';
+  snaps.forEach(dbChart);
+  addExportButtons();
+}
+
 /* ------------------------------- navigation ------------------------------ */
 
-const loaders = { overview: loadOverview, economy: loadEconomy, players: loadPlayers, logs: loadLogs, admin: loadAdmin, stats: loadStats, alerts: loadAlerts };
+const loaders = { overview: loadOverview, economy: loadEconomy, players: loadPlayers, logs: loadLogs, admin: loadAdmin, stats: loadStats, alerts: loadAlerts, db: loadDb };
 /* Les logs arrivent en direct par le flux ; le rafraîchissement complet sert de filet de sécurité. */
 const AUTO_REFRESH = { overview: 30000, logs: 60000, alerts: 60000 };
 let current = { page: null, arg: null };
@@ -965,6 +1045,7 @@ const PAGES = [
   { title: 'Joueurs', sub: 'Liste et recherche', href: '#players', icon: 'users' },
   { title: 'Logs', sub: 'Console serveur, chat et commandes', href: '#logs', icon: 'terminal' },
   { title: 'Statistiques', sub: 'Affluence, métiers, gangs, tueurs, armes', href: '#stats', icon: 'chart' },
+  { title: 'Base de données', sub: 'Tables, fortunes, objets, véhicules, bans', href: '#db', icon: 'database' },
   { title: 'Staff & sécurité', sub: 'Actions staff, connexions, explosions', href: '#admin', icon: 'shield' },
   { title: 'Alertes', sub: 'Historique, Discord, sauts d’argent suspects', href: '#alerts', icon: 'bell' },
   { title: 'Carte des morts', sub: 'Carte de chaleur, zones, captures', href: '#map', icon: 'map' },

@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1.1.0">
+<link rel="stylesheet" href="style.css?v=1.2.0">
 <script>
   /* Thème appliqué avant le rendu pour éviter le flash. */
   try { const t = localStorage.getItem('bl-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
@@ -71,6 +71,7 @@
     <symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
     <symbol id="i-discord" viewBox="0 0 24 24"><path d="M8 12h.01M16 12h.01"/><path d="M7.5 17.5 6 20c-2-.6-3.6-1.5-4-2 0-5 1.5-9 3.5-12C7 5 8.5 4.5 10 4.5l.5 1.5h3l.5-1.5c1.5 0 3 .5 4.5 1.5 2 3 3.5 7 3.5 12-.4.5-2 1.4-4 2l-1.5-2.5"/><path d="M7 16c3 1.5 7 1.5 10 0"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></symbol>
   </defs>
 </svg>
 
@@ -100,6 +101,7 @@
       <a href="#economy" data-page="economy"><svg class="ic"><use href="#i-wallet"/></svg><span class="label">Économie</span></a>
       <a href="#players" data-page="players"><svg class="ic"><use href="#i-users"/></svg><span class="label">Joueurs</span></a>
       <a href="#stats" data-page="stats"><svg class="ic"><use href="#i-chart"/></svg><span class="label">Statistiques</span></a>
+      <a href="#db" data-page="db"><svg class="ic"><use href="#i-database"/></svg><span class="label">Base de données</span></a>
       <div class="nav-group label">Surveillance</div>
       <a href="#alerts" data-page="alerts"><svg class="ic"><use href="#i-bell"/></svg><span class="label">Alertes</span><span class="nav-badge hidden" id="alertBadge">0</span></a>
       <a href="#map" data-page="map"><svg class="ic"><use href="#i-map"/></svg><span class="label">Carte des morts</span></a>
@@ -601,6 +603,45 @@
         </article>
       </section>
 
+      <!-- ----------------------------- Base de données ------------------------------ -->
+      <section id="page-db" class="page hidden" data-title="Base de données">
+        <div class="toolbar between">
+          <p class="lede">Lu directement dans la base du jeu par <span class="code">bl_telemetry</span>, toutes les 15 minutes.</p>
+          <span class="chip" id="dbTs">–</span>
+        </div>
+        <div class="kpis4">
+          <article class="card kpi" style="--accent: var(--c4)">
+            <div class="kpi-icon"><svg class="ic"><use href="#i-database"/></svg></div>
+            <div class="kpi-label">Tables</div>
+            <div class="kpi-value" id="dbTables">–</div>
+            <div class="kpi-foot">dans la base du jeu</div>
+          </article>
+          <article class="card kpi" style="--accent: var(--c2)">
+            <div class="kpi-icon"><svg class="ic"><use href="#i-list"/></svg></div>
+            <div class="kpi-label">Lignes</div>
+            <div class="kpi-value" id="dbRows">–</div>
+            <div class="kpi-foot" id="dbRowsFoot">–</div>
+          </article>
+          <article class="card kpi" style="--accent: var(--c1)">
+            <div class="kpi-icon"><svg class="ic"><use href="#i-package"/></svg></div>
+            <div class="kpi-label">Taille</div>
+            <div class="kpi-value" id="dbSize">–</div>
+            <div class="kpi-foot">données + index</div>
+          </article>
+          <article class="card kpi" style="--accent: var(--c3)">
+            <div class="kpi-icon"><svg class="ic"><use href="#i-trending"/></svg></div>
+            <div class="kpi-label">Plus forte croissance</div>
+            <div class="kpi-value" id="dbGrowth">–</div>
+            <div class="kpi-foot" id="dbGrowthFoot">sur 24 h</div>
+          </article>
+        </div>
+        <div class="db-cards" id="dbCards"></div>
+        <article class="card">
+          <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-database"/></svg>Tables de la base</div><span class="chip">plus grosses en premier</span></header>
+          <div class="table-wrap"><table class="t" id="tDbTables"><thead><tr><th>Table</th><th class="r">Lignes</th><th class="r">+24 h</th><th class="r">+7 j</th><th>Taille</th></tr></thead><tbody></tbody></table></div>
+        </article>
+      </section>
+
     </main>
   </div>
 
@@ -640,7 +681,7 @@
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="map.js?v=1.1.0"></script>
-<script src="app.js?v=1.1.0"></script>
+<script src="map.js?v=1.2.0"></script>
+<script src="app.js?v=1.2.0"></script>
 </body>
 </html>
