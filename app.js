@@ -1,7 +1,8 @@
 'use strict';
 /* Panel Brothers Life — logique front. Pages: overview, economy, players, player, logs, admin. */
 
-const API_BASE = 'https://panel-api.webgune.dev';
+// Les données passent par le serveur du panel (server.js), qui vérifie la connexion puis interroge l'API.
+const API_BASE = '';
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const charts = {};
@@ -75,7 +76,8 @@ function trend(el, first, last) {
 /* ---------------------------------- API ---------------------------------- */
 
 async function api(name, params = '') {
-  const r = await fetch(API_BASE + '/api/' + name + params);
+  const r = await fetch(API_BASE + '/api/' + name + params, { credentials: 'include' });
+  if (r.status === 401) { showLogin('session'); throw Object.assign(new Error('connexion requise'), { status: 401 }); }
   if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status} sur /api/${name}`), { status: r.status });
   return r.json();
 }
@@ -774,7 +776,7 @@ function onTick(d) {
 
 function connectStream() {
   if (!('EventSource' in window)) { setFeedState('off'); return; }
-  stream = new EventSource(API_BASE + '/api/stream');
+  stream = new EventSource(API_BASE + '/api/stream', { withCredentials: true });
   stream.addEventListener('open', () => { streamFails = 0; setFeedState('on'); });
   stream.addEventListener('tick', (e) => { try { onTick(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   stream.addEventListener('error', () => {
@@ -811,6 +813,8 @@ function exportTable(table, name) {
 
 function addExportButtons() {
   for (const table of $$('table.t')) {
+    if (table.dataset.export) continue;
+    table.dataset.export = '1';
     const card = table.closest('.card');
     const head = card && $('.card-head, .console-head', card);
     const name = (head?.innerText || table.id).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || table.id;
@@ -845,9 +849,205 @@ segmented('statsRange', 'd', (v) => { statsDays = Number(v); run(true); });
 segmented('anoMin', 'min', (v) => { anoMin = Number(v); run(false); });
 segmented('anoRange', 'h', (v) => { anoHours = Number(v); run(false); });
 
+/* ----------------------------- base de données ----------------------------- */
+
+const bytes = (b) => {
+  const u = ['o', 'Ko', 'Mo', 'Go', 'To'];
+  let i = 0; b = Number(b) || 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return (i ? b.toFixed(b < 10 ? 1 : 0).replace('.', ',') : b) + ' ' + u[i];
+};
+const growth = (now, before) => (before == null ? '<span class="time">–</span>'
+  : now - before === 0 ? '<span class="time">0</span>'
+  : `<span class="${now > before ? 'pos' : 'neg'}">${now > before ? '+' : '−'}${fmt.format(Math.abs(now - before))}</span>`);
+const colLabel = (c) => String(c).replace(/_/g, ' ').replace(/^./, (x) => x.toUpperCase());
+const cellLabel = (v) => String(v ?? '–').replace(/^\d+\.\s/, ''); // "1. < 10 k$" -> "< 10 k$" (préfixe de tri)
+const isNum = (v) => typeof v === 'number' || (typeof v === 'string' && v !== '' && !isNaN(v));
+
+function dbCard(s, i) {
+  const id = 'db-' + s.name;
+  const head = `<header class="card-head"><div class="card-title">${icon(s.kind === 'table' ? 'list' : 'chart')}${esc(s.label)}</div><span class="chip" title="${esc(dt(s.ts))}">${esc(rel(s.ts))}</span></header>`;
+  if ((s.kind === 'bar' || s.kind === 'donut') && s.rows.length) return `<article class="card chart-card">${head}<div class="chart"><canvas id="${id}"></canvas></div></article>`;
+  const cols = s.columns || [];
+  const numeric = cols.map((_, j) => s.rows.length && s.rows.every((r) => r[j] == null || isNum(r[j])));
+  const body = s.rows.length
+    ? s.rows.map((r) => `<tr>${cols.map((_, j) => numeric[j] ? `<td class="r money">${fmt.format(Number(r[j]) || 0)}</td>` : `<td>${esc(cellLabel(r[j]))}</td>`).join('')}</tr>`).join('')
+    : `<tr><td class="empty" colspan="${cols.length || 1}"><div class="empty-ic">${icon('list')}</div>Aucune ligne.</td></tr>`;
+  const wide = cols.length > 3 ? ' wide' : '';
+  return `<article class="card${wide}">${head}<div class="table-wrap"><table class="t" id="${id}"><thead><tr>${cols.map((c, j) => `<th class="${numeric[j] ? 'r' : ''}">${esc(colLabel(c))}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></article>`;
+}
+
+function dbChart(s) {
+  const id = 'db-' + s.name;
+  const el = document.getElementById(id);
+  if (!el || el.tagName !== 'CANVAS') return;
+  const labels = s.rows.map((r) => cellLabel(r[0]));
+  const values = s.rows.map((r) => Number(r[1]) || 0);
+  if (s.kind === 'donut') { doughnut(id, labels.map((name, i) => ({ name, n: values[i] }))); return; }
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(el, {
+    type: 'bar',
+    data: { labels, datasets: [bars(colLabel(s.columns?.[1] || 'valeur'), values, T.c1, { borderRadius: 6, maxBarThickness: 26 })] },
+    options: {
+      indexAxis: labels.length > 6 ? 'y' : 'x', animation: reduceMotion ? false : { duration: 600 }, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${fmt.format(c.parsed[labels.length > 6 ? 'x' : 'y'])} ${s.columns?.[1] || ''}` } } },
+      scales: {
+        x: { grid: { display: labels.length > 6, color: T.line, drawTicks: false }, border: { display: false }, ticks: { color: T.ink2 } },
+        y: { grid: { display: labels.length <= 6, color: T.line, drawTicks: false }, border: { display: false }, ticks: { color: T.ink2, precision: 0 } },
+      },
+    },
+  });
+}
+
+async function loadDb() {
+  const d = await api('db');
+  const tables = d.tables || [];
+  const totalRows = tables.reduce((s, t) => s + t.rows, 0);
+  animateNumber($('#dbTables'), tables.length || null);
+  animateNumber($('#dbRows'), tables.length ? totalRows : null, (n) => fmtCompact.format(n));
+  const before = tables.filter((t) => t.rows24h != null);
+  const grown = before.reduce((s, t) => s + (t.rows - t.rows24h), 0);
+  $('#dbRowsFoot').innerHTML = before.length ? `${growth(totalRows, totalRows - grown)} sur 24 h` : 'estimation MySQL';
+  $('#dbSize').textContent = tables.length ? bytes(tables.reduce((s, t) => s + t.bytes, 0)) : '–';
+  const top = before.map((t) => ({ ...t, g: t.rows - t.rows24h })).sort((a, b) => b.g - a.g)[0];
+  $('#dbGrowth').textContent = top && top.g > 0 ? '+' + fmtCompact.format(top.g) : '–';
+  $('#dbGrowthFoot').textContent = top && top.g > 0 ? `${top.name} · sur 24 h` : 'pas encore d’historique';
+  $('#dbTs').textContent = d.tablesTs ? 'lu ' + rel(d.tablesTs) : 'en attente de bl_telemetry';
+
+  const maxB = tables[0]?.bytes || 1;
+  rows('#tDbTables', tables, (t) => `<tr><td><span class="code">${esc(t.name)}</span></td><td class="r money">${fmt.format(t.rows)}</td>
+    <td class="r money">${growth(t.rows, t.rows24h)}</td><td class="r money">${growth(t.rows, t.rows7d)}</td>
+    <td><div class="size-bar"><div class="rank-bar"><i style="width:${Math.max(2, Math.round(t.bytes / maxB * 100))}%"></i></div><span>${bytes(t.bytes)}</span></div></td></tr>`,
+  'Aucune donnée : installe bl_telemetry 1.1 (module dbsync) sur le serveur.');
+
+  const snaps = d.snapshots || [];
+  $('#dbCards').innerHTML = snaps.length ? snaps.map(dbCard).join('')
+    : '<article class="card wide"><div class="empty-block">Les lectures de la base apparaîtront ici après la mise à jour de <span class="code">bl_telemetry</span> sur le serveur.</div></article>';
+  snaps.forEach(dbChart);
+  addExportButtons();
+}
+
+/* --------------------------------- connexion -------------------------------- */
+
+let me = null;
+const LOGIN_MSG = {
+  refusee: 'Ton compte Discord n’a pas accès au panel. Demande à un webmaster de t’autoriser.',
+  expiree: 'La connexion a expiré, recommence.',
+  annulee: 'Connexion annulée.',
+  erreur: 'Discord n’a pas répondu correctement, réessaie dans un instant.',
+  session: 'Ta session a expiré ou ton accès a été retiré.',
+};
+const discordAvatar = (id, avatar, size = 64) => {
+  if (avatar) return `https://cdn.discordapp.com/avatars/${id}/${avatar}.${String(avatar).startsWith('a_') ? 'gif' : 'png'}?size=${size}`;
+  let n = 0;
+  try { n = Number((BigInt(id) >> 22n) % 6n); } catch { /* id invalide */ }
+  return `https://cdn.discordapp.com/embed/avatars/${n}.png`;
+};
+
+function showLogin(reason) {
+  if (document.body.classList.contains('locked') && reason === 'session') return; // garde le message déjà affiché
+  document.body.classList.remove('booting');
+  document.body.classList.add('locked');
+  $('#login').classList.remove('hidden');
+  const back = location.hash && !location.hash.startsWith('#connexion') ? location.hash : '';
+  $('#loginBtn').href = '/auth/discord?next=' + encodeURIComponent(location.pathname + back);
+  const msg = $('#loginMsg');
+  msg.textContent = LOGIN_MSG[reason] || '';
+  msg.classList.toggle('hidden', !LOGIN_MSG[reason]);
+  msg.classList.toggle('info', reason === 'annulee');
+  stream?.close();
+  clearInterval(refreshTimer);
+}
+
+function setMe(user) {
+  me = user;
+  $('#me').classList.remove('hidden');
+  $('#meAvatar').src = discordAvatar(user.id, user.avatar);
+  $('#meName').textContent = user.name || user.username || user.id;
+  const role = $('#meRole');
+  role.textContent = user.webmaster ? 'Webmaster' : 'Staff';
+  role.classList.toggle('wm', !!user.webmaster);
+  $('#logoutBtn').href = API_BASE + '/auth/logout';
+  $('#navAccess').classList.toggle('hidden', !user.webmaster);
+  if (user.webmaster) PAGES.push({ title: 'Accès au panel', sub: 'Autoriser ou retirer des comptes Discord', href: '#access', icon: 'key' });
+  PAGES.push({ title: 'Se déconnecter', sub: user.name || '', href: API_BASE + '/auth/logout', icon: 'logout', external: true });
+}
+
+const ACCESS_BADGE = (u) => u.webmaster ? '<span class="badge brand">Webmaster</span>'
+  : u.access === 'revoked' ? '<span class="badge danger">Retiré</span>'
+  : u.access === 'granted' ? '<span class="badge ok">Autorisé</span>'
+  : u.role_ok ? '<span class="badge ok">Par rôle Discord</span>'
+  : '<span class="badge warn">Sans accès</span>';
+
+async function postAccess(id, access, note) {
+  const r = await fetch(API_BASE + '/api/access', {
+    method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ discord_id: id, access, note }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { toast('Modification refusée', d.error || 'HTTP ' + r.status, 'warn'); return false; }
+  return true;
+}
+
+async function loadAccess() {
+  const d = await api('access');
+  const c = d.config || {};
+  $('#accSub').textContent = `${c.webmasters} webmaster(s) dans le .env · `
+    + (c.guild ? (c.roles ? `entrée automatique pour ${c.roles} rôle(s) du serveur Discord` : 'entrée automatique pour tous les membres du serveur Discord') : 'pas d’entrée automatique par rôle')
+    + ` · sessions de ${c.sessionDays} j`;
+  const users = d.users || [];
+  $('#accCount').textContent = users.length + ' comptes';
+  rows('#tAccess', users, (u) => {
+    const name = u.global_name || u.username || 'Jamais connecté';
+    const allowed = u.access === 'granted' || (u.access !== 'revoked' && u.role_ok);
+    const actions = u.webmaster ? '<span class="time">via .env</span>'
+      : allowed ? `<button type="button" class="btn sm" data-acc="revoked" data-id="${esc(u.discord_id)}">${icon('ban', 'sm')}Retirer</button>`
+      : `<button type="button" class="btn sm primary" data-acc="granted" data-id="${esc(u.discord_id)}">${icon('check', 'sm')}Autoriser</button>`;
+    const reset = !u.webmaster && u.access ? `<button type="button" class="btn sm" data-acc="" data-id="${esc(u.discord_id)}" title="Revenir au rôle Discord">Auto</button>` : '';
+    return `<tr><td><span class="who"><img class="acc-avatar" src="${esc(discordAvatar(u.discord_id, u.avatar))}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span><b>${esc(name)}</b>${u.username ? `<br><span class="time">@${esc(u.username)}</span>` : ''}</span></span></td>
+      <td><span class="code">${esc(u.discord_id)}</span></td><td>${ACCESS_BADGE(u)}</td>
+      <td class="time" title="${esc(dt(u.last_login))}">${u.last_login ? esc(rel(u.last_login)) : 'jamais'}</td>
+      <td class="msg">${esc(u.note || (u.added_by ? 'par ' + u.added_by : '–'))}</td>
+      <td class="r"><span class="acc-actions">${reset}${actions}</span></td></tr>`;
+  }, 'Personne pour le moment.');
+  rows('#tLogins', d.logins, (l) => `<tr><td class="time" title="${esc(dt(l.ts))}">${esc(rel(l.ts))}</td><td><b>${esc(l.username || l.discord_id)}</b> <span class="code">${esc(l.discord_id)}</span></td>
+    <td>${l.allowed ? '<span class="badge ok">Entré</span>' : '<span class="badge danger">Refusé</span>'}</td><td><span class="code">${esc(l.ip || '–')}</span></td></tr>`, 'Aucune connexion pour le moment.');
+}
+
+$('#tAccess').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-acc]');
+  if (!b) return;
+  b.disabled = true;
+  if (await postAccess(b.dataset.id, b.dataset.acc || null)) run(false); else b.disabled = false;
+});
+$('#accForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = $('#accId').value.trim();
+  if (await postAccess(id, 'granted', $('#accNote').value.trim() || null)) {
+    toast('Accès accordé', `L’ID ${id} peut maintenant se connecter.`, 'ok', 'check');
+    $('#accId').value = ''; $('#accNote').value = '';
+    run(false);
+  }
+});
+
+async function boot() {
+  const reason = (location.hash.match(/^#connexion=(\w+)/) || [])[1];
+  if (reason) history.replaceState(null, '', location.pathname);
+  let r = null;
+  try { r = await fetch(API_BASE + '/api/me', { credentials: 'include' }); } catch { /* API injoignable : on affiche quand même */ }
+  if (r && r.status === 401) { showLogin(reason); return; }
+  const d = r && r.ok ? await r.json().catch(() => ({})) : {};
+  document.body.classList.remove('booting');
+  if (d.auth && d.user) setMe(d.user);
+  route();
+  pingStatus();
+  connectStream();
+  refreshAlertBadge();
+}
+
 /* ------------------------------- navigation ------------------------------ */
 
-const loaders = { overview: loadOverview, economy: loadEconomy, players: loadPlayers, logs: loadLogs, admin: loadAdmin, stats: loadStats, alerts: loadAlerts };
+const loaders = { overview: loadOverview, economy: loadEconomy, players: loadPlayers, logs: loadLogs, admin: loadAdmin, stats: loadStats, alerts: loadAlerts, db: loadDb, access: loadAccess };
 /* Les logs arrivent en direct par le flux ; le rafraîchissement complet sert de filet de sécurité. */
 const AUTO_REFRESH = { overview: 30000, logs: 60000, alerts: 60000 };
 let current = { page: null, arg: null };
@@ -863,6 +1063,7 @@ async function run(first) {
     lastUpdate = Date.now();
     lastError = false;
   } catch (err) {
+    if (err.status === 401) return; // l'écran de connexion est déjà affiché
     console.error(err);
     lastError = true;
     if (err.status === 404) toast('Fonction pas encore disponible', 'Cette page a besoin de la dernière version de l’API (bl-panel).', 'warn');
@@ -965,6 +1166,7 @@ const PAGES = [
   { title: 'Joueurs', sub: 'Liste et recherche', href: '#players', icon: 'users' },
   { title: 'Logs', sub: 'Console serveur, chat et commandes', href: '#logs', icon: 'terminal' },
   { title: 'Statistiques', sub: 'Affluence, métiers, gangs, tueurs, armes', href: '#stats', icon: 'chart' },
+  { title: 'Base de données', sub: 'Tables, fortunes, objets, véhicules, bans', href: '#db', icon: 'database' },
   { title: 'Staff & sécurité', sub: 'Actions staff, connexions, explosions', href: '#admin', icon: 'shield' },
   { title: 'Alertes', sub: 'Historique, Discord, sauts d’argent suspects', href: '#alerts', icon: 'bell' },
   { title: 'Carte des morts', sub: 'Carte de chaleur, zones, captures', href: '#map', icon: 'map' },
@@ -1006,7 +1208,7 @@ function openPalette() {
   setTimeout(() => $('#paletteInput').focus(), 10);
 }
 function closePalette() { $('#palette').classList.add('hidden'); }
-function goPalette(i) { const it = palItems[i]; if (!it) return; closePalette(); location.hash = it.href; }
+function goPalette(i) { const it = palItems[i]; if (!it) return; closePalette(); if (it.external) location.href = it.href; else location.hash = it.href; }
 
 $('#paletteInput').addEventListener('input', () => {
   palSel = 0;
@@ -1048,7 +1250,4 @@ let resizeTimer;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => Object.values(charts).forEach((c) => c.resize()), 150); });
 
 /* Accès direct, sans login. */
-route();
-pingStatus();
-connectStream();
-refreshAlertBadge();
+boot();

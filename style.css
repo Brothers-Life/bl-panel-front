@@ -846,7 +846,55 @@ tr.row-new td { animation: flash 1.6s var(--ease); }
 
 .tabbar button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 0; border: 0; border-radius: 14px; background: none; font-size: 10.5px; font-weight: 500; color: var(--ink-3); }
 
+.db-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.db-cards .card.wide { grid-column: 1 / -1; }
+.db-cards .chart { height: 260px; }
+.size-bar { display: flex; align-items: center; gap: 10px; min-width: 160px; }
+.size-bar .rank-bar { flex: 1; margin: 0; }
+.size-bar span { font-family: var(--mono); font-size: 12px; color: var(--ink-2); white-space: nowrap; min-width: 64px; text-align: right; }
+
+/* ------------------------------ Connexion ------------------------------ */
+body.booting .app, body.locked .app, body.locked .tabbar { visibility: hidden; }
+.login { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 24px 16px; }
+.login-card {
+  width: 400px; max-width: 100%; text-align: center; padding: 40px 32px 28px; border-radius: 24px;
+  background: var(--surface); border: 1px solid var(--line-strong);
+  backdrop-filter: blur(24px) saturate(140%); -webkit-backdrop-filter: blur(24px) saturate(140%);
+  box-shadow: 0 40px 80px -30px rgba(0, 0, 0, .6); animation: pop .4s var(--ease) both;
+}
+.login-logo { width: 84px; height: 84px; margin: 0 auto 18px; border-radius: 24px; display: grid; place-items: center; box-shadow: 0 0 0 1px var(--line-strong), 0 16px 40px -10px var(--glow); }
+.login-logo img { border-radius: 20px; }
+.login h1 { margin: 0; font-size: 26px; letter-spacing: -.03em; }
+.login-sub { margin: 4px 0 24px; color: var(--ink-3); }
+.login-msg { margin: 0 0 16px; padding: 10px 12px; border-radius: 12px; font-size: 13px; color: var(--danger); background: rgba(244, 63, 94, .08); border: 1px solid rgba(244, 63, 94, .2); }
+.login-msg.info { color: var(--ink-2); background: var(--surface-2); border-color: var(--line); }
+.discord-btn {
+  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 13px 16px; border-radius: 14px;
+  background: #5865f2; color: #fff; font-weight: 600; box-shadow: 0 12px 30px -10px #5865f2; transition: transform .2s var(--ease), filter .2s;
+}
+.discord-btn:hover { transform: translateY(-1px); filter: brightness(1.08); }
+.login-foot { margin: 18px 0 0; font-size: 12px; color: var(--ink-3); }
+
+.me { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); white-space: nowrap; }
+.me-avatar { width: 34px; height: 34px; border-radius: 10px; flex: none; object-fit: cover; background: var(--surface-hover); }
+.me-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.me-text b { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.me-text span { font-size: 11.5px; color: var(--ink-3); }
+.me-text span.wm { color: var(--brand-1); font-weight: 600; }
+.me-out { width: 30px; height: 30px; }
+.app.collapsed .me { justify-content: center; padding: 8px 0; }
+.app.collapsed .me-out { display: none; }
+
+.access-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.access-form .field { height: 40px; }
+.access-form #accId { width: 200px; }
+.btn.primary { background: var(--brand-grad); color: #1d1206; border-color: transparent; font-weight: 600; }
+.btn.sm { padding: 5px 10px; font-size: 12px; border-radius: 8px; }
+.acc-actions { display: inline-flex; gap: 6px; justify-content: flex-end; }
+.acc-avatar { width: 28px; height: 28px; border-radius: 9px; object-fit: cover; flex: none; }
+
 @media (max-width: 1200px) {
+  .db-cards { grid-template-columns: minmax(0, 1fr); }
   .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .map-layout { grid-template-columns: minmax(0, 1fr); }
   .map-side { max-height: 420px; }
