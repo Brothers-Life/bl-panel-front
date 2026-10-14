@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1.4.0">
+<link rel="stylesheet" href="style.css?v=1.5.0">
 <script>
   /* Thème appliqué avant le rendu pour éviter le flash. */
   try { const t = localStorage.getItem('bl-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
@@ -76,6 +76,9 @@
     <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
     <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></symbol>
+    <symbol id="i-megaphone" viewBox="0 0 24 24"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></symbol>
   </defs>
 </svg>
 
@@ -117,11 +120,14 @@
       <a href="#economy" data-page="economy"><svg class="ic"><use href="#i-wallet"/></svg><span class="label">Économie</span></a>
       <a href="#players" data-page="players"><svg class="ic"><use href="#i-users"/></svg><span class="label">Joueurs</span></a>
       <a href="#stats" data-page="stats"><svg class="ic"><use href="#i-chart"/></svg><span class="label">Statistiques</span></a>
+      <a href="#search" data-page="search"><svg class="ic"><use href="#i-search"/></svg><span class="label">Recherche</span></a>
       <a href="#db" data-page="db"><svg class="ic"><use href="#i-database"/></svg><span class="label">Base de données</span></a>
       <div class="nav-group label">Surveillance</div>
       <a href="#alerts" data-page="alerts"><svg class="ic"><use href="#i-bell"/></svg><span class="label">Alertes</span><span class="nav-badge hidden" id="alertBadge">0</span></a>
       <a href="#map" data-page="map"><svg class="ic"><use href="#i-map"/></svg><span class="label">Carte des morts</span></a>
       <a href="#logs" data-page="logs"><svg class="ic"><use href="#i-terminal"/></svg><span class="label">Logs</span></a>
+      <a href="#scripts" data-page="scripts"><svg class="ic"><use href="#i-cpu"/></svg><span class="label">Scripts</span></a>
+      <a href="#announce" data-page="announce"><svg class="ic"><use href="#i-megaphone"/></svg><span class="label">Annonces</span></a>
       <a href="#admin" data-page="admin"><svg class="ic"><use href="#i-shield"/></svg><span class="label">Staff &amp; sécurité</span></a>
       <a href="#access" data-page="access" class="hidden" id="navAccess"><svg class="ic"><use href="#i-key"/></svg><span class="label">Accès au panel</span></a>
     </nav>
@@ -297,6 +303,18 @@
           <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-activity"/></svg>Masse monétaire</div><span class="chip">cash + banque · 7 j</span></header>
           <div class="chart tall"><canvas id="chMass"></canvas></div>
         </article>
+        <article class="card">
+          <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-trending"/></svg>Inflation</div>
+            <div class="segmented sm" id="infRange" role="radiogroup" aria-label="Période"><button type="button" data-d="30" class="active">30 j</button><button type="button" data-d="90">90 j</button><button type="button" data-d="365">1 an</button></div></header>
+          <div class="inf-kpis">
+            <div><span>Fortune médiane</span><b id="infMedian">–</b><small>la moitié des personnages a moins</small></div>
+            <div><span>Fortune moyenne</span><b id="infMean">–</b><small id="infMeanFoot">–</small></div>
+            <div><span>Argent créé (net)</span><b id="infNet">–</b><small id="infNetFoot">sur la période</small></div>
+            <div><span>Par personnage</span><b id="infPer">–</b><small>masse ÷ personnages</small></div>
+          </div>
+          <div class="chart"><canvas id="chInflation"></canvas></div>
+          <div class="table-wrap"><table class="t" id="tInfFlows"><thead><tr><th>Type de flux</th><th class="r">Opérations</th><th class="r">Montant</th></tr></thead><tbody></tbody></table></div>
+        </article>
         <div class="grid2">
           <article class="card chart-card">
             <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-building"/></svg>Comptes sociétés</div><span class="chip">moyenne horaire</span></header>
@@ -358,6 +376,7 @@
             <div class="profile-id">
               <div class="profile-name"><span id="pName">–</span><span class="badge" id="pOnline">–</span></div>
               <div class="profile-tags" id="pTags"></div>
+              <div class="profile-tags linked hidden" id="pLinked"></div>
             </div>
           </div>
           <div class="profile-stats">
@@ -374,9 +393,18 @@
         </article>
 
         <div class="tabs" role="tablist" id="playerTabs">
+          <button role="tab" class="tab" data-tab="journal"><svg class="ic sm"><use href="#i-clock"/></svg>Journal</button>
           <button role="tab" class="tab active" data-tab="assets"><svg class="ic sm"><use href="#i-package"/></svg>Inventaire &amp; véhicules</button>
           <button role="tab" class="tab" data-tab="money"><svg class="ic sm"><use href="#i-wallet"/></svg>Argent</button>
           <button role="tab" class="tab" data-tab="activity"><svg class="ic sm"><use href="#i-activity"/></svg>Activité</button>
+        </div>
+
+        <div class="tabpanel hidden" data-panel="journal">
+          <article class="card">
+            <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-clock"/></svg>Tout ce qui s’est passé</div><span class="chip" id="jCount">–</span></header>
+            <ul class="journal" id="journal"></ul>
+            <button type="button" class="btn more-btn hidden" id="jMore">Plus ancien</button>
+          </article>
         </div>
 
         <div class="tabpanel" data-panel="assets">
@@ -580,7 +608,7 @@
                 <button type="button" data-h="168">7 j</button>
               </div>
             </div>
-            <div class="table-wrap"><table class="t" id="tAnomalies"><thead><tr><th>Joueur</th><th class="r">Plus gros saut</th><th>Quand</th><th class="r">Avant → après</th><th class="r">Net période</th></tr></thead><tbody></tbody></table></div>
+            <div class="table-wrap"><table class="t" id="tAnomalies"><thead><tr><th>Joueur</th><th class="r">Plus gros saut</th><th>Quand</th><th class="r">Avant → après</th><th class="r">Net période</th><th></th></tr></thead><tbody></tbody></table></div>
           </article>
         </div>
       </section>
@@ -623,6 +651,75 @@
           <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-image"/></svg>Captures des dernières morts</div><span class="chip" id="shotCount">–</span></header>
           <div class="shots" id="shots"></div>
         </article>
+      </section>
+
+      <!-- -------------------------------- Recherche --------------------------------- -->
+      <section id="page-search" class="page hidden" data-title="Recherche">
+        <div class="toolbar">
+          <label class="field grow big">
+            <svg class="ic"><use href="#i-search"/></svg>
+            <input id="gSearch" type="search" placeholder="Nom, citizenid, plaque, mot dans les logs, le chat, les sanctions…" autocomplete="off">
+          </label>
+          <div class="segmented" id="gDays" role="radiogroup" aria-label="Période">
+            <button type="button" data-d="1">24 h</button><button type="button" data-d="7" class="active">7 j</button><button type="button" data-d="30">30 j</button>
+          </div>
+        </div>
+        <div id="gEmpty" class="card"><div class="empty-block">Tape au moins 2 caractères : joueurs, logs serveur, chat et tous les journaux du jeu sont fouillés d’un coup.</div></div>
+        <div id="gResults" class="hidden page-stack">
+          <article class="card"><header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-users"/></svg>Joueurs</div><span class="chip" id="gnPlayers">–</span></header><div class="g-players" id="gPlayers"></div></article>
+          <article class="card"><header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-list"/></svg>Événements et journaux du jeu</div><span class="chip" id="gnEvents">–</span></header>
+            <div class="table-wrap"><table class="t" id="tgEvents"><thead><tr><th>Heure</th><th>Source</th><th>Joueur</th><th>Détails</th></tr></thead><tbody></tbody></table></div></article>
+          <article class="card"><header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-message"/></svg>Chat et commandes</div><span class="chip" id="gnChat">–</span></header>
+            <div class="table-wrap"><table class="t" id="tgChat"><thead><tr><th>Heure</th><th>Joueur</th><th>Type</th><th>Message</th></tr></thead><tbody></tbody></table></div></article>
+          <article class="card flush console"><header class="console-head"><span class="dots"><i></i><i></i><i></i></span><span>logs serveur</span><span class="chip" id="gnLogs">–</span></header>
+            <div class="table-wrap"><table class="t mono" id="tgLogs"><thead><tr><th>Heure</th><th>Canal</th><th>Niveau</th><th>Message</th></tr></thead><tbody></tbody></table></div></article>
+        </div>
+      </section>
+
+      <!-- --------------------------------- Scripts ---------------------------------- -->
+      <section id="page-scripts" class="page hidden" data-title="Scripts">
+        <div class="kpis4">
+          <article class="card kpi" style="--accent: var(--ok)"><div class="kpi-icon"><svg class="ic"><use href="#i-cpu"/></svg></div><div class="kpi-label">Ressources démarrées</div><div class="kpi-value" id="scStarted">–</div><div class="kpi-foot" id="scStartedFoot">–</div></article>
+          <article class="card kpi" style="--accent: var(--danger)"><div class="kpi-icon"><svg class="ic"><use href="#i-alert"/></svg></div><div class="kpi-label">Erreurs</div><div class="kpi-value" id="scErrors">–</div><div class="kpi-foot" id="scErrorsFoot">sur 24 h</div></article>
+          <article class="card kpi" style="--accent: var(--warn)"><div class="kpi-icon"><svg class="ic"><use href="#i-activity"/></svg></div><div class="kpi-label">Ralentissements</div><div class="kpi-value" id="scHitches">–</div><div class="kpi-foot" id="scHitchesFoot">sur 24 h</div></article>
+          <article class="card kpi" style="--accent: var(--c4)"><div class="kpi-icon"><svg class="ic"><use href="#i-refresh"/></svg></div><div class="kpi-label">Redémarrages</div><div class="kpi-value" id="scRestarts">–</div><div class="kpi-foot" id="scRestartsFoot">sur 30 jours</div></article>
+        </div>
+        <article class="card chart-card">
+          <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-activity"/></svg>Ralentissements du serveur (hitch warnings)</div><span class="chip">par heure · 24 h</span></header>
+          <div class="chart slim"><canvas id="chHitches"></canvas></div>
+        </article>
+        <article class="card">
+          <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-alert"/></svg>Scripts qui posent problème</div><span class="chip">erreurs et avertissements · 24 h</span></header>
+          <div class="table-wrap"><table class="t" id="tScripts"><thead><tr><th>Ressource</th><th class="r">Erreurs</th><th class="r">Avert.</th><th>Dernière erreur</th></tr></thead><tbody></tbody></table></div>
+        </article>
+        <article class="card">
+          <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-package"/></svg>Ressources du serveur</div>
+            <div class="segmented sm" id="resFilter"><button type="button" data-f="" class="active">Toutes</button><button type="button" data-f="started">Démarrées</button><button type="button" data-f="stopped">Arrêtées</button></div></header>
+          <div class="table-wrap"><table class="t" id="tResources"><thead><tr><th>Ressource</th><th>État</th><th>Version</th><th>Auteur</th></tr></thead><tbody></tbody></table></div>
+        </article>
+      </section>
+
+      <!-- --------------------------------- Annonces --------------------------------- -->
+      <section id="page-announce" class="page hidden" data-title="Annonces">
+        <div class="grid2">
+          <article class="card">
+            <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-megaphone"/></svg>Nouvelle annonce</div><span class="chip" id="anWho">–</span></header>
+            <form class="announce-form" id="anForm">
+              <label class="field"><input id="anTitle" maxlength="60" placeholder="Titre (ex. Information)" value="Annonce"></label>
+              <textarea id="anMsg" maxlength="500" rows="4" placeholder="Message envoyé à tous les joueurs connectés…" required></textarea>
+              <div class="an-row">
+                <div class="segmented sm" id="anMode"><button type="button" data-m="both" class="active">Chat + notification</button><button type="button" data-m="chat">Chat</button><button type="button" data-m="notify">Notification</button></div>
+                <div class="segmented sm" id="anType"><button type="button" data-t="inform" class="active">Info</button><button type="button" data-t="success">Succès</button><button type="button" data-t="warning">Attention</button><button type="button" data-t="error">Urgent</button></div>
+              </div>
+              <div class="an-preview" id="anPreview"><b>Annonce</b><span>Ton message apparaîtra ici.</span></div>
+              <div class="an-row"><span class="time" id="anCount">0 / 500</span><button type="submit" class="btn primary"><svg class="ic sm"><use href="#i-send"/></svg><span>Envoyer en jeu</span></button></div>
+            </form>
+          </article>
+          <article class="card">
+            <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-clock"/></svg>Annonces envoyées</div></header>
+            <ul class="timeline" id="anList"></ul>
+          </article>
+        </div>
       </section>
 
       <!-- ----------------------------- Base de données ------------------------------ -->
@@ -717,6 +814,15 @@
   </div>
 </div>
 
+<div class="modal hidden" id="traceModal" role="dialog" aria-modal="true" aria-label="Origine du saut d'argent">
+  <div class="palette-backdrop" data-close-modal></div>
+  <div class="modal-box">
+    <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-trending"/></svg><span id="trTitle">Origine du saut d’argent</span></div>
+      <button type="button" class="icon-btn" data-close-modal aria-label="Fermer"><svg class="ic"><use href="#i-x"/></svg></button></header>
+    <div id="trBody"></div>
+  </div>
+</div>
+
 <div class="lightbox hidden" id="lightbox" role="dialog" aria-modal="true">
   <div class="palette-backdrop" data-close-lightbox></div>
   <figure class="lightbox-box">
@@ -729,7 +835,7 @@
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="map.js?v=1.4.0"></script>
-<script src="app.js?v=1.4.0"></script>
+<script src="map.js?v=1.5.0"></script>
+<script src="app.js?v=1.5.0"></script>
 </body>
 </html>
