@@ -75,7 +75,8 @@ function trend(el, first, last) {
 /* ---------------------------------- API ---------------------------------- */
 
 async function api(name, params = '') {
-  const r = await fetch(API_BASE + '/api/' + name + params);
+  const r = await fetch(API_BASE + '/api/' + name + params, { credentials: 'include' });
+  if (r.status === 401) { showLogin('session'); throw Object.assign(new Error('connexion requise'), { status: 401 }); }
   if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status} sur /api/${name}`), { status: r.status });
   return r.json();
 }
@@ -774,7 +775,7 @@ function onTick(d) {
 
 function connectStream() {
   if (!('EventSource' in window)) { setFeedState('off'); return; }
-  stream = new EventSource(API_BASE + '/api/stream');
+  stream = new EventSource(API_BASE + '/api/stream', { withCredentials: true });
   stream.addEventListener('open', () => { streamFails = 0; setFeedState('on'); });
   stream.addEventListener('tick', (e) => { try { onTick(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   stream.addEventListener('error', () => {
@@ -925,9 +926,127 @@ async function loadDb() {
   addExportButtons();
 }
 
+/* --------------------------------- connexion -------------------------------- */
+
+let me = null;
+const LOGIN_MSG = {
+  refusee: 'Ton compte Discord n’a pas accès au panel. Demande à un webmaster de t’autoriser.',
+  expiree: 'La connexion a expiré, recommence.',
+  annulee: 'Connexion annulée.',
+  erreur: 'Discord n’a pas répondu correctement, réessaie dans un instant.',
+  session: 'Ta session a expiré ou ton accès a été retiré.',
+};
+const discordAvatar = (id, avatar, size = 64) => {
+  if (avatar) return `https://cdn.discordapp.com/avatars/${id}/${avatar}.${String(avatar).startsWith('a_') ? 'gif' : 'png'}?size=${size}`;
+  let n = 0;
+  try { n = Number((BigInt(id) >> 22n) % 6n); } catch { /* id invalide */ }
+  return `https://cdn.discordapp.com/embed/avatars/${n}.png`;
+};
+
+function showLogin(reason) {
+  if (document.body.classList.contains('locked') && reason === 'session') return; // garde le message déjà affiché
+  document.body.classList.remove('booting');
+  document.body.classList.add('locked');
+  $('#login').classList.remove('hidden');
+  const back = location.hash && !location.hash.startsWith('#connexion') ? location.hash : '';
+  $('#loginBtn').href = API_BASE + '/auth/discord?next=' + encodeURIComponent(location.origin + location.pathname + back);
+  const msg = $('#loginMsg');
+  msg.textContent = LOGIN_MSG[reason] || '';
+  msg.classList.toggle('hidden', !LOGIN_MSG[reason]);
+  msg.classList.toggle('info', reason === 'annulee');
+  stream?.close();
+  clearInterval(refreshTimer);
+}
+
+function setMe(user) {
+  me = user;
+  $('#me').classList.remove('hidden');
+  $('#meAvatar').src = discordAvatar(user.id, user.avatar);
+  $('#meName').textContent = user.name || user.username || user.id;
+  const role = $('#meRole');
+  role.textContent = user.webmaster ? 'Webmaster' : 'Staff';
+  role.classList.toggle('wm', !!user.webmaster);
+  $('#logoutBtn').href = API_BASE + '/auth/logout';
+  $('#navAccess').classList.toggle('hidden', !user.webmaster);
+  if (user.webmaster) PAGES.push({ title: 'Accès au panel', sub: 'Autoriser ou retirer des comptes Discord', href: '#access', icon: 'key' });
+  PAGES.push({ title: 'Se déconnecter', sub: user.name || '', href: API_BASE + '/auth/logout', icon: 'logout', external: true });
+}
+
+const ACCESS_BADGE = (u) => u.webmaster ? '<span class="badge brand">Webmaster</span>'
+  : u.access === 'revoked' ? '<span class="badge danger">Retiré</span>'
+  : u.access === 'granted' ? '<span class="badge ok">Autorisé</span>'
+  : u.role_ok ? '<span class="badge ok">Par rôle Discord</span>'
+  : '<span class="badge warn">Sans accès</span>';
+
+async function postAccess(id, access, note) {
+  const r = await fetch(API_BASE + '/api/access', {
+    method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ discord_id: id, access, note }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { toast('Modification refusée', d.error || 'HTTP ' + r.status, 'warn'); return false; }
+  return true;
+}
+
+async function loadAccess() {
+  const d = await api('access');
+  const c = d.config || {};
+  $('#accSub').textContent = `${c.webmasters} webmaster(s) dans le .env · `
+    + (c.guild ? (c.roles ? `entrée automatique pour ${c.roles} rôle(s) du serveur Discord` : 'entrée automatique pour tous les membres du serveur Discord') : 'pas d’entrée automatique par rôle')
+    + ` · sessions de ${c.sessionDays} j`;
+  const users = d.users || [];
+  $('#accCount').textContent = users.length + ' comptes';
+  rows('#tAccess', users, (u) => {
+    const name = u.global_name || u.username || 'Jamais connecté';
+    const allowed = u.access === 'granted' || (u.access !== 'revoked' && u.role_ok);
+    const actions = u.webmaster ? '<span class="time">via .env</span>'
+      : allowed ? `<button type="button" class="btn sm" data-acc="revoked" data-id="${esc(u.discord_id)}">${icon('ban', 'sm')}Retirer</button>`
+      : `<button type="button" class="btn sm primary" data-acc="granted" data-id="${esc(u.discord_id)}">${icon('check', 'sm')}Autoriser</button>`;
+    const reset = !u.webmaster && u.access ? `<button type="button" class="btn sm" data-acc="" data-id="${esc(u.discord_id)}" title="Revenir au rôle Discord">Auto</button>` : '';
+    return `<tr><td><span class="who"><img class="acc-avatar" src="${esc(discordAvatar(u.discord_id, u.avatar))}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span><b>${esc(name)}</b>${u.username ? `<br><span class="time">@${esc(u.username)}</span>` : ''}</span></span></td>
+      <td><span class="code">${esc(u.discord_id)}</span></td><td>${ACCESS_BADGE(u)}</td>
+      <td class="time" title="${esc(dt(u.last_login))}">${u.last_login ? esc(rel(u.last_login)) : 'jamais'}</td>
+      <td class="msg">${esc(u.note || (u.added_by ? 'par ' + u.added_by : '–'))}</td>
+      <td class="r"><span class="acc-actions">${reset}${actions}</span></td></tr>`;
+  }, 'Personne pour le moment.');
+  rows('#tLogins', d.logins, (l) => `<tr><td class="time" title="${esc(dt(l.ts))}">${esc(rel(l.ts))}</td><td><b>${esc(l.username || l.discord_id)}</b> <span class="code">${esc(l.discord_id)}</span></td>
+    <td>${l.allowed ? '<span class="badge ok">Entré</span>' : '<span class="badge danger">Refusé</span>'}</td><td><span class="code">${esc(l.ip || '–')}</span></td></tr>`, 'Aucune connexion pour le moment.');
+}
+
+$('#tAccess').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-acc]');
+  if (!b) return;
+  b.disabled = true;
+  if (await postAccess(b.dataset.id, b.dataset.acc || null)) run(false); else b.disabled = false;
+});
+$('#accForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = $('#accId').value.trim();
+  if (await postAccess(id, 'granted', $('#accNote').value.trim() || null)) {
+    toast('Accès accordé', `L’ID ${id} peut maintenant se connecter.`, 'ok', 'check');
+    $('#accId').value = ''; $('#accNote').value = '';
+    run(false);
+  }
+});
+
+async function boot() {
+  const reason = (location.hash.match(/^#connexion=(\w+)/) || [])[1];
+  if (reason) history.replaceState(null, '', location.pathname);
+  let r = null;
+  try { r = await fetch(API_BASE + '/api/me', { credentials: 'include' }); } catch { /* API injoignable : on affiche quand même */ }
+  if (r && r.status === 401) { showLogin(reason); return; }
+  const d = r && r.ok ? await r.json().catch(() => ({})) : {};
+  document.body.classList.remove('booting');
+  if (d.auth && d.user) setMe(d.user);
+  route();
+  pingStatus();
+  connectStream();
+  refreshAlertBadge();
+}
+
 /* ------------------------------- navigation ------------------------------ */
 
-const loaders = { overview: loadOverview, economy: loadEconomy, players: loadPlayers, logs: loadLogs, admin: loadAdmin, stats: loadStats, alerts: loadAlerts, db: loadDb };
+const loaders = { overview: loadOverview, economy: loadEconomy, players: loadPlayers, logs: loadLogs, admin: loadAdmin, stats: loadStats, alerts: loadAlerts, db: loadDb, access: loadAccess };
 /* Les logs arrivent en direct par le flux ; le rafraîchissement complet sert de filet de sécurité. */
 const AUTO_REFRESH = { overview: 30000, logs: 60000, alerts: 60000 };
 let current = { page: null, arg: null };
@@ -943,6 +1062,7 @@ async function run(first) {
     lastUpdate = Date.now();
     lastError = false;
   } catch (err) {
+    if (err.status === 401) return; // l'écran de connexion est déjà affiché
     console.error(err);
     lastError = true;
     if (err.status === 404) toast('Fonction pas encore disponible', 'Cette page a besoin de la dernière version de l’API (bl-panel).', 'warn');
@@ -1087,7 +1207,7 @@ function openPalette() {
   setTimeout(() => $('#paletteInput').focus(), 10);
 }
 function closePalette() { $('#palette').classList.add('hidden'); }
-function goPalette(i) { const it = palItems[i]; if (!it) return; closePalette(); location.hash = it.href; }
+function goPalette(i) { const it = palItems[i]; if (!it) return; closePalette(); if (it.external) location.href = it.href; else location.hash = it.href; }
 
 $('#paletteInput').addEventListener('input', () => {
   palSel = 0;
@@ -1129,7 +1249,4 @@ let resizeTimer;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => Object.values(charts).forEach((c) => c.resize()), 150); });
 
 /* Accès direct, sans login. */
-route();
-pingStatus();
-connectStream();
-refreshAlertBadge();
+boot();
