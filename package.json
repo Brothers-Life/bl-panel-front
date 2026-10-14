@@ -1,0 +1,9 @@
+{
+  "name": "bl-panel-front",
+  "version": "1.3.0",
+  "private": true,
+  "description": "Panel staff Brothers Life : site, connexion Discord et relais vers bl-panel-api",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=20" }
+}

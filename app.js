@@ -1,7 +1,8 @@
 'use strict';
 /* Panel Brothers Life — logique front. Pages: overview, economy, players, player, logs, admin. */
 
-const API_BASE = 'https://panel-api.webgune.dev';
+// Les données passent par le serveur du panel (server.js), qui vérifie la connexion puis interroge l'API.
+const API_BASE = '';
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const charts = {};
@@ -949,7 +950,7 @@ function showLogin(reason) {
   document.body.classList.add('locked');
   $('#login').classList.remove('hidden');
   const back = location.hash && !location.hash.startsWith('#connexion') ? location.hash : '';
-  $('#loginBtn').href = API_BASE + '/auth/discord?next=' + encodeURIComponent(location.origin + location.pathname + back);
+  $('#loginBtn').href = '/auth/discord?next=' + encodeURIComponent(location.pathname + back);
   const msg = $('#loginMsg');
   msg.textContent = LOGIN_MSG[reason] || '';
   msg.classList.toggle('hidden', !LOGIN_MSG[reason]);
