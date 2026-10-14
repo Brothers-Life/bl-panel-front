@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1.5.0">
+<link rel="stylesheet" href="style.css?v=1.7.0">
 <script>
   /* Thème appliqué avant le rendu pour éviter le flash. */
   try { const t = localStorage.getItem('bl-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
@@ -126,8 +126,10 @@
       <a href="#alerts" data-page="alerts"><svg class="ic"><use href="#i-bell"/></svg><span class="label">Alertes</span><span class="nav-badge hidden" id="alertBadge">0</span></a>
       <a href="#map" data-page="map"><svg class="ic"><use href="#i-map"/></svg><span class="label">Carte des morts</span></a>
       <a href="#logs" data-page="logs"><svg class="ic"><use href="#i-terminal"/></svg><span class="label">Logs</span></a>
+      <a href="#perf" data-page="perf"><svg class="ic"><use href="#i-zap"/></svg><span class="label">Performances</span></a>
       <a href="#scripts" data-page="scripts"><svg class="ic"><use href="#i-cpu"/></svg><span class="label">Scripts</span></a>
       <a href="#announce" data-page="announce"><svg class="ic"><use href="#i-megaphone"/></svg><span class="label">Annonces</span></a>
+      <a href="#staff" data-page="staff"><svg class="ic"><use href="#i-gavel"/></svg><span class="label">Suivi staff</span></a>
       <a href="#admin" data-page="admin"><svg class="ic"><use href="#i-shield"/></svg><span class="label">Staff &amp; sécurité</span></a>
       <a href="#access" data-page="access" class="hidden" id="navAccess"><svg class="ic"><use href="#i-key"/></svg><span class="label">Accès au panel</span></a>
     </nav>
@@ -653,6 +655,116 @@
         </article>
       </section>
 
+      <!-- ------------------------------- Performances ------------------------------- -->
+      <section id="page-perf" class="page hidden" data-title="Performances">
+        <div class="toolbar between">
+          <p class="lede">Ce qui ralentit le serveur et les joueurs : scripts, ressources, MLO, zones, entités.</p>
+          <div class="segmented" id="pfRange" role="radiogroup" aria-label="Période">
+            <button type="button" data-h="6">6 h</button><button type="button" data-h="24" class="active">24 h</button><button type="button" data-h="168">7 j</button>
+          </div>
+        </div>
+
+        <article class="card">
+          <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-zap"/></svg>Quoi optimiser en priorité</div><span class="chip" id="pfRecCount">–</span></header>
+          <ul class="timeline recs" id="pfRecs"></ul>
+        </article>
+
+        <div class="kpis4">
+          <article class="card kpi" style="--accent: var(--c1)"><div class="kpi-icon"><svg class="ic"><use href="#i-cpu"/></svg></div><div class="kpi-label">Tick serveur (svMain)</div><div class="kpi-value" id="pfMain">–</div><div class="kpi-foot" id="pfMainFoot">–</div></article>
+          <article class="card kpi" style="--accent: var(--c2)"><div class="kpi-icon"><svg class="ic"><use href="#i-activity"/></svg></div><div class="kpi-label">FPS moyen des joueurs</div><div class="kpi-value" id="pfFps">–</div><div class="kpi-foot" id="pfFpsFoot">–</div></article>
+          <article class="card kpi" style="--accent: var(--warn)"><div class="kpi-icon"><svg class="ic"><use href="#i-alert"/></svg></div><div class="kpi-label">Ralentissements</div><div class="kpi-value" id="pfHitch">–</div><div class="kpi-foot" id="pfHitchFoot">–</div></article>
+          <article class="card kpi" style="--accent: var(--c4)"><div class="kpi-icon"><svg class="ic"><use href="#i-car"/></svg></div><div class="kpi-label">Entités sur le serveur</div><div class="kpi-value" id="pfEnt">–</div><div class="kpi-foot" id="pfEntFoot">–</div></article>
+        </div>
+
+        <div class="grid2">
+          <article class="card chart-card">
+            <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-cpu"/></svg>Tick serveur et joueurs</div><span class="chip">ms par tick · par heure</span></header>
+            <div class="chart"><canvas id="chPfCorr"></canvas></div>
+            <div class="table-wrap"><table class="t" id="tPfThreads"><thead><tr><th>Thread</th><th class="r">Moyenne</th><th class="r">95e centile</th><th class="r">Max</th></tr></thead><tbody></tbody></table></div>
+          </article>
+          <article class="card chart-card">
+            <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-package"/></svg>Coût des ressources serveur</div><span class="chip" id="pfProfRuns">–</span></header>
+            <div class="chart"><canvas id="chPfRes"></canvas></div>
+          </article>
+        </div>
+
+        <article class="card">
+          <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-package"/></svg>Ressources serveur les plus coûteuses</div><span class="chip">profiler FiveM</span></header>
+          <div class="table-wrap"><table class="t" id="tPfRes"><thead><tr><th>Ressource</th><th class="r">% du temps serveur</th><th class="r">ms par seconde</th><th class="r">Appels</th><th class="r">Échantillons</th></tr></thead><tbody></tbody></table></div>
+          <div class="tr-sec">Opérations les plus longues (dernier échantillon)</div>
+          <div class="table-wrap"><table class="t mono" id="tPfTop"><thead><tr><th>Opération</th><th>Ressource</th><th class="r">Durée totale</th><th class="r">Appels</th></tr></thead><tbody></tbody></table></div>
+        </article>
+
+        <div class="grid2">
+          <article class="card chart-card">
+            <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-users"/></svg>Répartition des FPS joueurs</div></header>
+            <div class="chart"><canvas id="chPfHist"></canvas></div>
+          </article>
+          <article class="card chart-card">
+            <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-activity"/></svg>FPS moyen dans le temps</div></header>
+            <div class="chart"><canvas id="chPfFps"></canvas></div>
+          </article>
+        </div>
+
+        <article class="card">
+          <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-building"/></svg>Intérieurs (MLO) les plus lourds</div><span class="chip">FPS des joueurs à l’intérieur</span></header>
+          <div class="table-wrap"><table class="t" id="tPfInt"><thead><tr><th>Intérieur</th><th>Près de</th><th class="r">FPS</th><th class="r">Écart</th><th class="r">Pire image</th><th class="r">Objets</th><th class="r">Joueurs</th><th class="r">Mesures</th><th></th></tr></thead><tbody></tbody></table></div>
+        </article>
+        <article class="card">
+          <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-map"/></svg>Zones les plus lourdes</div><span class="chip">carrés de 250 m</span></header>
+          <div class="table-wrap"><table class="t" id="tPfZones"><thead><tr><th>Zone</th><th class="r">FPS</th><th class="r">Écart</th><th class="r">Pire image</th><th class="r">Objets</th><th class="r">Peds</th><th class="r">Véhicules</th><th class="r">Mesures</th><th></th></tr></thead><tbody></tbody></table></div>
+        </article>
+
+        <div class="grid2">
+          <article class="card">
+            <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-users"/></svg>Joueurs</div><span class="chip">les plus bas en premier</span></header>
+            <div class="table-wrap"><table class="t" id="tPfPlayers"><thead><tr><th>Joueur</th><th class="r">FPS</th><th class="r">Min</th><th class="r">Pire image</th><th class="r">Ping</th></tr></thead><tbody></tbody></table></div>
+          </article>
+          <article class="card">
+            <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-car"/></svg>Entités par modèle</div><span class="chip">dernier relevé</span></header>
+            <div id="pfEntities" class="ent-grid"></div>
+          </article>
+        </div>
+
+        <article class="card">
+          <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-database"/></svg>Ressources installées</div><span class="chip" id="pfInstalled">–</span></header>
+          <div class="toolbar tight">
+            <div class="segmented sm" id="pfResFilter"><button type="button" data-f="maps" class="active">Cartes / MLO</button><button type="button" data-f="files">Plus de fichiers</button><button type="button" data-f="stopped">Arrêtées</button></div>
+          </div>
+          <div class="table-wrap"><table class="t" id="tPfInstalled"><thead><tr><th>Ressource</th><th>État</th><th class="r">Fichiers envoyés</th><th class="r">Data files</th><th class="r">Scripts client</th><th class="r">Scripts serveur</th><th>Carte / MLO</th></tr></thead><tbody></tbody></table></div>
+        </article>
+      </section>
+
+      <!-- ------------------------------- Suivi staff -------------------------------- -->
+      <section id="page-staff" class="page hidden" data-title="Suivi staff">
+        <div class="toolbar">
+          <div class="segmented" id="stDays" role="radiogroup" aria-label="Période">
+            <button type="button" data-d="1">24 h</button><button type="button" data-d="7" class="active">7 j</button><button type="button" data-d="30">30 j</button>
+          </div>
+          <label class="field"><svg class="ic"><use href="#i-users"/></svg><select id="stStaff" class="bare-select"><option value="">Tout le staff</option></select></label>
+          <label class="field"><svg class="ic"><use href="#i-list"/></svg><select id="stCat" class="bare-select"><option value="">Toutes les actions</option></select></label>
+          <label class="field grow"><svg class="ic"><use href="#i-search"/></svg><input id="stQ" type="search" placeholder="Joueur visé, raison, action…" autocomplete="off"></label>
+        </div>
+        <div class="kpis4">
+          <article class="card kpi" style="--accent: var(--c4)"><div class="kpi-icon"><svg class="ic"><use href="#i-gavel"/></svg></div><div class="kpi-label">Actions staff</div><div class="kpi-value" id="stTotal">–</div><div class="kpi-foot" id="stTotalFoot">–</div></article>
+          <article class="card kpi" style="--accent: var(--c2)"><div class="kpi-icon"><svg class="ic"><use href="#i-users"/></svg></div><div class="kpi-label">Staff actifs</div><div class="kpi-value" id="stActive">–</div><div class="kpi-foot" id="stActiveFoot">–</div></article>
+          <article class="card kpi" style="--accent: var(--danger)"><div class="kpi-icon"><svg class="ic"><use href="#i-ban"/></svg></div><div class="kpi-label">Bans · kicks · warns</div><div class="kpi-value" id="stSanctions">–</div><div class="kpi-foot" id="stSanctionsFoot">–</div></article>
+          <article class="card kpi" style="--accent: var(--c1)"><div class="kpi-icon"><svg class="ic"><use href="#i-locate"/></svg></div><div class="kpi-label">Téléportations</div><div class="kpi-value" id="stTp">–</div><div class="kpi-foot" id="stTpFoot">–</div></article>
+        </div>
+        <article class="card">
+          <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-trophy"/></svg>Qui fait quoi</div><span class="chip">clic = filtrer</span></header>
+          <div class="table-wrap"><table class="t clickable" id="tStaff"><thead><tr><th>Staff</th><th class="r">Total</th><th class="r">Ban</th><th class="r">Kick</th><th class="r">Warn</th><th class="r">TP</th><th class="r">Soin</th><th class="r">Argent / objets</th><th class="r">Autres</th><th>Dernière action</th><th>Sources</th></tr></thead><tbody></tbody></table></div>
+        </article>
+        <div class="grid2">
+          <article class="card chart-card"><header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-activity"/></svg>Activité par jour</div></header><div class="chart"><canvas id="chStaffDays"></canvas></div></article>
+          <article class="card chart-card"><header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-chart"/></svg>Types d’actions</div></header><div class="chart"><canvas id="chStaffCats"></canvas></div></article>
+        </div>
+        <article class="card">
+          <header class="card-head"><div class="card-title"><svg class="ic"><use href="#i-list"/></svg>Toutes les actions</div><span class="chip" id="stCount">–</span></header>
+          <div class="table-wrap"><table class="t" id="tStaffActions"><thead><tr><th>Heure</th><th>Staff</th><th>Action</th><th>Cible</th><th>Raison / détails</th><th>Source</th></tr></thead><tbody></tbody></table></div>
+        </article>
+      </section>
+
       <!-- -------------------------------- Recherche --------------------------------- -->
       <section id="page-search" class="page hidden" data-title="Recherche">
         <div class="toolbar">
@@ -835,7 +947,7 @@
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="map.js?v=1.5.0"></script>
-<script src="app.js?v=1.5.0"></script>
+<script src="map.js?v=1.7.0"></script>
+<script src="app.js?v=1.7.0"></script>
 </body>
 </html>

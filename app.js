@@ -151,6 +151,7 @@ function timeChart(id, datasets, opts = {}) {
   let xMin = Infinity, xMax = -Infinity;
   for (const d of datasets) for (const p of d.data) if (Number.isFinite(p.x)) { if (p.x < xMin) xMin = p.x; if (p.x > xMax) xMax = p.x; }
   if (xMin === Infinity) xMin = xMax = undefined;
+  else if (xMin === xMax) { const pad = opts.bar ? 12 * 3600e3 : 3600e3; xMin -= pad; xMax += pad; } // un seul point : on l'encadre
   const span = xMin === undefined ? 0 : xMax - xMin;
   const fmtY = opts.money ? (v) => moneyCompact(v) : (v) => fmtCompact.format(v);
   charts[id] = new Chart($('#' + id), {
@@ -943,6 +944,9 @@ const GAME_LABELS = {
   harvest_zone_logs: 'Récolte', door_logs: 'Porte', bl_weapon_skin_log: 'Skin d’arme', shop_admin: 'Boutique (staff)',
   bank_flow: 'Flux bancaire', chat: 'Chat', command: 'Commande', explosion: 'Explosion', character_loaded: 'Personnage chargé',
   server_start: 'Démarrage serveur', anticheat: 'Anticheat', admin_action: 'Action staff',
+  txAdmin: 'txAdmin', panel: 'Panel', banque: 'Banque (staff)', mapeditor_audit: 'Éditeur de map', dj_audit: 'DJ',
+  tv_admin_logs: 'TV (staff)', admindash_role_actions: 'Rôles staff', admindash_blip_logs: 'Blips (staff)',
+  admindash_staff_loans: 'Prêts staff', qbx_vehicle_admin_probe: 'Véhicules (staff)', explosion_flood: 'Rafale d’explosions',
 };
 const sourceLabel = (type, subtype) => GAME_LABELS[subtype] || GAME_LABELS[type] || String(subtype || type || '?').replace(/_/g, ' ');
 const SKIP_KEYS = new Set(['id', 'citizenid', 'created_at', 'updated_at', 'createdAt', 'backfill', 'extra']);
@@ -1182,6 +1186,197 @@ segmented('resFilter', 'f', (v) => { resFilter = v; renderResources(); });
 segmented('anMode', 'm', (v) => { anMode = v; });
 segmented('anType', 't', (v) => { anType = v; renderAnPreview(); });
 
+/* ------------------------------- performances ------------------------------- */
+
+let pfHours = 24, pfResFilter = 'maps', pfInstalledList = [];
+const SEV_ICON = { critical: 'alert', warn: 'zap', info: 'list' };
+const fpsClass = (fps) => (fps < 30 ? 'neg' : fps < 45 ? 'delta-mid' : 'pos');
+const deltaCell = (fps, ref) => {
+  if (!ref || fps == null) return '<span class="time">–</span>';
+  const d = (fps / ref - 1) * 100;
+  return `<span class="${d <= -40 ? 'delta-bad' : d <= -20 ? 'delta-mid' : 'time'}">${d > 0 ? '+' : ''}${d.toFixed(0)} %</span>`;
+};
+const mapBtn = (x, y) => (Number.isFinite(Number(x)) ? `<a class="shot-btn" href="#map=${Math.round(x)},${Math.round(y)}" title="Voir sur la carte">${icon('map')}</a>` : '');
+const zoneOf = (x, y) => (typeof DeathMap !== 'undefined' && DeathMap.zoneName ? DeathMap.zoneName(Number(x), Number(y)) : '');
+
+function renderInstalled() {
+  const list = pfInstalledList.filter((r) => (pfResFilter === 'maps' ? r.map || r.dataFiles > 0 : pfResFilter === 'stopped' ? r.state !== 'started' : true))
+    .sort((a, b) => (pfResFilter === 'files' ? b.files - a.files : b.dataFiles - a.dataFiles || b.files - a.files));
+  rows('#tPfInstalled', list.slice(0, 200), (r) => `<tr><td><span class="code">${esc(r.name)}</span></td>
+    <td><span class="badge ${r.state === 'started' ? 'ok' : 'danger'}">${esc(r.state)}</span></td>
+    <td class="r money">${fmt.format(r.files)}</td><td class="r money">${fmt.format(r.dataFiles)}</td><td class="r money">${fmt.format(r.clientScripts)}</td><td class="r money">${fmt.format(r.serverScripts)}</td>
+    <td>${r.map ? '<span class="badge brand">carte</span>' : r.dataFiles ? '<span class="badge plain">data</span>' : '–'}</td></tr>`,
+  pfInstalledList.length ? 'Rien dans cette catégorie.' : 'En attente de bl_telemetry 1.4.');
+}
+
+async function loadPerf() {
+  const d = await api('perf', '?h=' + pfHours);
+  const recs = d.recommendations || [];
+  $('#pfRecCount').textContent = recs.length ? `${recs.length} point(s)` : 'rien à signaler';
+  $('#pfRecs').innerHTML = recs.length ? recs.map((r) => `<li class="sev-${r.severity}"><span class="feed-ic">${icon(SEV_ICON[r.severity] || 'list')}</span><div>
+    <div class="tl-title">${esc(r.title)}</div><div class="tl-detail">${esc(r.detail || '')}</div>
+    ${r.link ? `<div class="tl-meta"><a class="badge brand" href="${esc(r.link)}">${r.link.startsWith('#map') ? 'voir sur la carte' : 'voir le détail'}</a></div>` : ''}</div></li>`).join('')
+    : '<li class="feed-empty" style="display:block">Rien d’anormal sur la période. 👌</li>';
+
+  const threads = d.server?.threads || [];
+  const main = threads.find((t) => t.thread === 'svMain');
+  $('#pfMain').innerHTML = main ? `${Number(main.avg).toFixed(1)} <small class="time">ms</small>` : '–';
+  $('#pfMainFoot').textContent = main ? `95e centile ${Number(main.p95).toFixed(1)} ms · max ${Number(main.max).toFixed(0)} ms` : 'pas de mesure';
+  const c = d.clients || {};
+  $('#pfFps').innerHTML = c.fps != null ? `<span class="${fpsClass(c.fps)}">${Number(c.fps).toFixed(0)}</span>` : '–';
+  $('#pfFpsFoot').textContent = c.samples ? `${fmt.format(c.samples)} mesures · pire image ${Math.round(c.worst || 0)} ms` : 'en attente de bl_telemetry 1.4';
+  $('#pfHitch').textContent = fmt.format(d.server?.hitches?.count || 0);
+  $('#pfHitchFoot').textContent = d.server?.hitches?.worst ? `le pire : ${fmt.format(d.server.hitches.worst)} ms` : 'aucun';
+  const e = d.entities || {};
+  const totalEnt = ['vehicles', 'peds', 'objects'].reduce((s2, k) => s2 + (e[k]?.total || 0), 0);
+  $('#pfEnt').textContent = d.entities ? fmt.format(totalEnt) : '–';
+  $('#pfEntFoot').textContent = d.entities ? `${e.vehicles?.total ?? 0} véhicules · ${e.peds?.total ?? 0} peds · ${e.objects?.total ?? 0} objets` : 'en attente';
+
+  rows('#tPfThreads', threads, (t) => `<tr><td><span class="code">${esc(t.thread)}</span></td><td class="r money">${Number(t.avg).toFixed(1)} ms</td>
+    <td class="r money ${t.p95 > 25 ? 'neg' : ''}">${Number(t.p95).toFixed(1)} ms</td><td class="r money">${Number(t.max).toFixed(0)} ms</td></tr>`, 'Pas de mesure de tick (FIVEM_BASE).');
+
+  const corr = d.server?.correlation || [];
+  if (charts.chPfCorr) charts.chPfCorr.destroy();
+  charts.chPfCorr = new Chart($('#chPfCorr'), {
+    data: { datasets: [
+      { type: 'bar', label: 'joueurs', data: corr.map((r) => ({ x: Number(r.t), y: Number(r.players) || 0 })), backgroundColor: alpha(T.c4, .35), borderRadius: 4, yAxisID: 'y1', maxBarThickness: 18 },
+      { type: 'line', label: 'ms par tick', data: corr.map((r) => ({ x: Number(r.t), y: Number(r.ms) })), borderColor: T.c1, backgroundColor: T.c1, pointRadius: 0, borderWidth: 2, tension: .35, yAxisID: 'y' },
+    ] },
+    options: {
+      animation: reduceMotion ? false : { duration: 600 }, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { type: 'linear', grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 6, callback: (v) => timeLabel(v, pfHours * 3600e3) } },
+        y: { beginAtZero: true, position: 'left', grid: { color: T.line, drawTicks: false }, border: { display: false }, ticks: { callback: (v) => v + ' ms' } },
+        y1: { beginAtZero: true, position: 'right', grid: { display: false }, border: { display: false }, ticks: { precision: 0 } },
+      },
+      plugins: { tooltip: { callbacks: { title: (it) => (it.length ? dt(it[0].parsed.x) : '') } } },
+    },
+  });
+
+  const prof = d.profiler || {};
+  const res = (prof.resources || []).filter((r) => r.name !== '(non attribué)');
+  $('#pfProfRuns').textContent = prof.runs ? `${prof.runs} échantillon(s)` : 'pas encore mesuré';
+  if (charts.chPfRes) charts.chPfRes.destroy();
+  charts.chPfRes = new Chart($('#chPfRes'), {
+    type: 'bar',
+    data: { labels: res.slice(0, 12).map((r) => r.name), datasets: [bars('% du temps serveur', res.slice(0, 12).map((r) => Number(r.pct.toFixed(2))), T.c1, { borderRadius: 6, maxBarThickness: 20 })] },
+    options: {
+      indexAxis: 'y', animation: reduceMotion ? false : { duration: 600 }, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (x) => ` ${x.parsed.x} % du temps serveur` } } },
+      scales: { x: { grid: { color: T.line, drawTicks: false }, border: { display: false }, ticks: { callback: (v) => v + ' %' } }, y: { grid: { display: false }, border: { display: false }, ticks: { color: T.ink2 } } },
+    },
+  });
+  rows('#tPfRes', prof.resources || [], (r) => `<tr><td><span class="code">${esc(r.name)}</span></td>
+    <td class="r"><b class="${r.pct >= 15 ? 'neg' : r.pct >= 5 ? 'delta-mid' : ''}">${r.pct.toFixed(1)} %</b></td><td class="r money">${r.msPerSec.toFixed(1)}</td>
+    <td class="r money">${fmt.format(r.calls)}</td><td class="r money">${r.runs}</td></tr>`,
+  'Pas encore mesuré : ajoute « add_ace resource.bl_telemetry command.profiler allow » dans server.cfg.');
+  rows('#tPfTop', prof.last?.top || [], (t) => `<tr><td class="msg">${esc(t.name)}</td><td><span class="code">${esc(t.res)}</span></td><td class="r">${Number(t.ms).toFixed(1)} ms</td><td class="r">${fmt.format(t.n)}</td></tr>`, '–');
+
+  const hist = c.hist || [0, 0, 0, 0, 0];
+  if (charts.chPfHist) charts.chPfHist.destroy();
+  charts.chPfHist = new Chart($('#chPfHist'), {
+    type: 'bar',
+    data: { labels: ['< 20', '20–30', '30–45', '45–60', '60 +'], datasets: [{ data: hist, backgroundColor: [T.c3, alpha(T.c3, .7), T.c5, alpha(T.c2, .7), T.c2], borderRadius: 6, maxBarThickness: 48 }] },
+    options: {
+      animation: reduceMotion ? false : { duration: 600 }, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (x) => ` ${fmt.format(x.parsed.y)} mesures (${hist.reduce((a, b) => a + b, 0) ? Math.round(x.parsed.y / hist.reduce((a, b) => a + b, 0) * 100) : 0} %)` } } },
+      scales: { x: { grid: { display: false }, border: { display: false }, title: { display: true, text: 'FPS', color: T.ink3 } }, y: { grid: { color: T.line, drawTicks: false }, border: { display: false }, ticks: { precision: 0 } } },
+    },
+  });
+  timeChart('chPfFps', [series('FPS moyen', (c.timeline || []).filter((w) => w.n).map((w) => ({ x: new Date(w.t).getTime(), y: Number(w.fps) })), T.c2)]);
+
+  const ref = c.fps;
+  rows('#tPfInt', d.interiors || [], (i) => `<tr><td><span class="code">${esc(i.key)}</span></td><td>${esc(zoneOf(i.x, i.y))} <span class="time">${Math.round(i.x)}, ${Math.round(i.y)}</span></td>
+    <td class="r"><b class="${fpsClass(i.fps)}">${Number(i.fps).toFixed(0)}</b></td><td class="r">${deltaCell(i.fps, ref)}</td><td class="r money">${Math.round(i.worst || 0)} ms</td>
+    <td class="r money">${fmt.format(Math.round(i.obj || 0))}</td><td class="r money">${i.players ?? '–'}</td><td class="r money">${fmt.format(i.n)}</td><td class="r">${mapBtn(i.x, i.y)}</td></tr>`,
+  'Pas encore de mesures dans des intérieurs.');
+  rows('#tPfZones', d.zones || [], (z) => `<tr><td>${esc(zoneOf(z.x, z.y))} <span class="time">${Math.round(z.x)}, ${Math.round(z.y)}</span></td>
+    <td class="r"><b class="${fpsClass(z.fps)}">${Number(z.fps).toFixed(0)}</b></td><td class="r">${deltaCell(z.fps, ref)}</td><td class="r money">${Math.round(z.worst || 0)} ms</td>
+    <td class="r money">${fmt.format(Math.round(z.obj || 0))}</td><td class="r money">${Math.round(z.peds || 0)}</td><td class="r money">${Math.round(z.veh || 0)}</td><td class="r money">${fmt.format(z.n)}</td><td class="r">${mapBtn(z.x, z.y)}</td></tr>`,
+  'Pas encore de mesures.');
+  rows('#tPfPlayers', d.players || [], (p) => `<tr><td>${playerLink(p.key && !p.key.startsWith('src') ? p.key : null, p.name || p.key)}</td>
+    <td class="r"><b class="${fpsClass(p.fps)}">${Number(p.fps).toFixed(0)}</b></td><td class="r money">${Number(p.fps_min ?? 0).toFixed(0)}</td>
+    <td class="r money">${Math.round(p.worst || 0)} ms</td><td class="r money ${p.ping > 150 ? 'neg' : ''}">${p.ping != null ? Math.round(p.ping) + ' ms' : '–'}</td></tr>`, 'Pas encore de mesures.');
+
+  const ent = [['vehicles', 'Véhicules'], ['peds', 'Peds'], ['objects', 'Objets']];
+  $('#pfEntities').innerHTML = d.entities ? ent.map(([k, label]) => {
+    const x = e[k] || { total: 0, top: [] };
+    return `<div class="ent-col"><span>${label}</span><b>${fmt.format(x.total)}</b><ol>${(x.top || []).slice(0, 6).map((m) => `<li><code title="hash du modèle">${esc(m.model)}</code><span>${fmt.format(m.n)}</span></li>`).join('')}</ol></div>`;
+  }).join('') : '<div class="empty-block" style="grid-column:1/-1">En attente de bl_telemetry 1.4.</div>';
+
+  const inst = d.installed || {};
+  pfInstalledList = inst.list || [];
+  $('#pfInstalled').textContent = inst.total ? `${inst.started} démarrées / ${inst.total} · ${(inst.maps || []).length} cartes ou MLO` : '–';
+  renderInstalled();
+}
+segmented('pfRange', 'h', (v) => { pfHours = Number(v); run(false); });
+segmented('pfResFilter', 'f', (v) => { pfResFilter = v; renderInstalled(); });
+
+/* -------------------------------- suivi staff -------------------------------- */
+
+const CAT_STYLE = { ban: 'danger', unban: 'ok', kick: 'warn', warn: 'warn', tp: 'info', soin: 'ok', prison: 'danger', 'argent / objets': 'brand', annonce: 'info', 'accès panel': 'brand' };
+let stDays = 7, stTimer;
+async function loadStaff() {
+  const p = new URLSearchParams({ days: stDays });
+  if ($('#stStaff').value) p.set('staff', $('#stStaff').value);
+  if ($('#stCat').value) p.set('cat', $('#stCat').value);
+  if ($('#stQ').value.trim()) p.set('q', $('#stQ').value.trim());
+  const d = await api('staff', '?' + p);
+  const cats = d.categories || {};
+  const staffList = d.staff || [];
+  const sum = (...k) => k.reduce((s2, x) => s2 + (cats[x] || 0), 0);
+  const period = stDays === 1 ? 'sur 24 h' : `sur ${stDays} jours`;
+  animateNumber($('#stTotal'), d.total || 0);
+  $('#stTotalFoot').textContent = period + (d.truncated ? ' · 3 000 dernières' : '');
+  animateNumber($('#stActive'), staffList.filter((x) => x.actor !== '?').length);
+  $('#stActiveFoot').textContent = staffList[0] ? `le plus actif : ${staffList[0].actor}` : period;
+  animateNumber($('#stSanctions'), sum('ban', 'kick', 'warn'));
+  $('#stSanctionsFoot').textContent = `${cats.ban || 0} ban · ${cats.kick || 0} kick · ${cats.warn || 0} warn`;
+  animateNumber($('#stTp'), cats.tp || 0);
+  $('#stTpFoot').textContent = period;
+
+  // listes déroulantes (on garde la sélection)
+  const keep = (sel, values, label) => {
+    const el = $(sel), cur = el.value;
+    el.innerHTML = `<option value="">${label}</option>` + values.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    el.value = values.includes(cur) ? cur : '';
+  };
+  keep('#stStaff', staffList.map((x) => x.actor), 'Tout le staff');
+  keep('#stCat', Object.keys(cats).sort(), 'Toutes les actions');
+
+  const main = ['ban', 'kick', 'warn', 'tp', 'soin', 'argent / objets'];
+  rows('#tStaff', staffList, (x) => {
+    const other = x.total - main.reduce((s2, k) => s2 + (x.cats[k] || 0), 0);
+    const n = (k) => (x.cats[k] ? `<b>${fmt.format(x.cats[k])}</b>` : '<span class="time">–</span>');
+    return `<tr data-staff="${esc(x.actor)}"><td><span class="who">${avatar(x.actor, x.actor)}<span class="who-name">${esc(x.actor)}</span></span></td>
+      <td class="r"><b>${fmt.format(x.total)}</b></td>${main.map((k) => `<td class="r">${n(k)}</td>`).join('')}<td class="r">${other ? fmt.format(other) : '<span class="time">–</span>'}</td>
+      <td class="time" title="${esc(dt(x.last))}">${esc(rel(x.last))}</td><td>${x.sources.map((s2) => `<span class="badge plain">${esc(sourceLabel(null, s2))}</span>`).join(' ')}</td></tr>`;
+  }, 'Aucune action staff sur la période.');
+
+  const days = Object.entries(d.days_activity || {}).sort();
+  timeChart('chStaffDays', [bars('actions', days.map(([k, v]) => ({ x: new Date(k).getTime(), y: v })), T.c4, { maxBarThickness: 26 })], { bar: true });
+  doughnut('chStaffCats', Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([name, n]) => ({ name, n })));
+
+  const items = d.items || [];
+  $('#stCount').textContent = items.length + (items.length >= 500 ? '+ actions' : ' actions');
+  rows('#tStaffActions', items, (it) => `<tr><td class="time" title="${esc(dt(it.ts))}">${dt(it.ts)}</td>
+    <td><b>${esc(it.actor)}</b></td>
+    <td><span class="badge ${CAT_STYLE[it.category] || 'plain'} cat-badge">${esc(it.category)}</span> <span class="time">${esc(it.action || '')}</span></td>
+    <td>${it.targetCid ? playerLink(it.targetCid, it.target || it.targetCid) : esc(it.target || '–')}</td>
+    <td class="msg">${esc(clean(it.reason || ''))}${it.duration ? ` <span class="code">${esc(it.duration)}</span>` : ''}</td>
+    <td><span class="badge plain">${esc(sourceLabel(null, it.source))}</span></td></tr>`, 'Aucune action ne correspond aux filtres.');
+}
+$('#tStaff').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-staff]');
+  if (!tr) return;
+  $('#stStaff').value = $('#stStaff').value === tr.dataset.staff ? '' : tr.dataset.staff;
+  run(false);
+});
+$('#stStaff').addEventListener('change', () => run(false));
+$('#stCat').addEventListener('change', () => run(false));
+$('#stQ').addEventListener('input', () => { clearTimeout(stTimer); stTimer = setTimeout(() => run(false), 350); });
+segmented('stDays', 'd', (v) => { stDays = Number(v); run(false); });
+
 /* --------------------------------- connexion -------------------------------- */
 
 let me = null;
@@ -1302,9 +1497,9 @@ async function boot() {
 
 /* ------------------------------- navigation ------------------------------ */
 
-const loaders = { overview: loadOverview, economy: loadEconomy, players: loadPlayers, logs: loadLogs, admin: loadAdmin, stats: loadStats, alerts: loadAlerts, db: loadDb, access: loadAccess, search: loadSearch, scripts: loadScripts, announce: loadAnnounce };
+const loaders = { overview: loadOverview, economy: loadEconomy, players: loadPlayers, logs: loadLogs, admin: loadAdmin, stats: loadStats, alerts: loadAlerts, db: loadDb, access: loadAccess, staff: loadStaff, perf: loadPerf, search: loadSearch, scripts: loadScripts, announce: loadAnnounce };
 /* Les logs arrivent en direct par le flux ; le rafraîchissement complet sert de filet de sécurité. */
-const AUTO_REFRESH = { overview: 30000, logs: 60000, alerts: 60000, scripts: 60000, announce: 5000 };
+const AUTO_REFRESH = { overview: 30000, logs: 60000, alerts: 60000, scripts: 60000, announce: 5000, staff: 60000, perf: 120000 };
 let current = { page: null, arg: null };
 let refreshTimer;
 
@@ -1428,8 +1623,10 @@ const PAGES = [
   { title: 'Statistiques', sub: 'Affluence, métiers, gangs, tueurs, armes', href: '#stats', icon: 'chart' },
   { title: 'Recherche globale', sub: 'Joueurs, logs, chat et journaux du jeu', href: '#search', icon: 'search' },
   { title: 'Base de données', sub: 'Tables, fortunes, objets, véhicules, bans', href: '#db', icon: 'database' },
+  { title: 'Performances', sub: 'Quoi optimiser : ressources, MLO, zones, entités, FPS', href: '#perf', icon: 'zap' },
   { title: 'Scripts', sub: 'Erreurs par ressource, ralentissements, redémarrages', href: '#scripts', icon: 'cpu' },
   { title: 'Annonces', sub: 'Envoyer un message à tous les joueurs en jeu', href: '#announce', icon: 'megaphone' },
+  { title: 'Suivi staff', sub: 'Qui ban, kick, téléporte… qui fait quoi', href: '#staff', icon: 'gavel' },
   { title: 'Staff & sécurité', sub: 'Actions staff, connexions, explosions', href: '#admin', icon: 'shield' },
   { title: 'Alertes', sub: 'Historique, Discord, sauts d’argent suspects', href: '#alerts', icon: 'bell' },
   { title: 'Carte des morts', sub: 'Carte de chaleur, zones, captures', href: '#map', icon: 'map' },

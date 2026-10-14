@@ -348,5 +348,8 @@ const DeathMap = (() => {
     draw();
   }
 
-  return { load, redraw: draw };
+  // Nom de la zone la plus proche (utilisé par la page Performances).
+  const zoneName = (x, y) => (Number.isFinite(x) && Number.isFinite(y) ? ZONES[zoneOf({ x, y })][0] : '?');
+
+  return { load, redraw: draw, zoneName };
 })();
