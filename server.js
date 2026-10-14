@@ -19,6 +19,10 @@ try {
     if (m && !line.trim().startsWith('#') && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2');
   }
 } catch { /* pas de .env : variables de l'hébergeur */ }
+// Nettoie les variables : espaces autour et commentaire en fin de ligne (" # ...") collés par erreur.
+for (const [k, v] of Object.entries(process.env)) {
+  if (typeof v === 'string') { const c = v.replace(/\s+#.*$/, '').trim(); if (c !== v) process.env[k] = c; }
+}
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const API_URL = (process.env.API_URL || '').replace(/\/$/, '');
